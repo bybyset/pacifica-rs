@@ -1,0 +1,8 @@
+
+
+
+pub trait ReplicaClient {
+
+
+
+}

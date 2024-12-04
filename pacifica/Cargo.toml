@@ -1,5 +1,5 @@
 [package]
-name = "pacifica"
+name = "pacifica-rs"
 version = { workspace = true }
 edition = { workspace = true }
 authors = { workspace = true }
@@ -12,3 +12,25 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-futures = { workspace = true }
+
+byte-unit = { workspace = true }
+thiserror = { workspace = true }
+anyerror = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+pacifica-rs-macros = { path = "../macros" }
+
+
+[features]
+
+default = ["tokio-runtime"]
+
+# Enable the default Tokio runtime
+tokio-runtime = ["tokio"]

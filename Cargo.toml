@@ -12,8 +12,36 @@ repository = "https://github.com/bybyset/pacifica-rs"
 
 
 [workspace.dependencies]
+tracing = "0.1.41"
+tracing-subscriber = {version = "0.3.19", features = ["env-filter"] }
+tracing-appender = "0.2.3"
+tracing-futures = "0.2.5"
 
+byte-unit = "5.1.4"
+thiserror = "2.0.3"
+anyerror = "0.1.12"
+anyhow = "1.0.93"
+clap = {version = "4.5.21", features = ["derive", "env"]}
+
+futures = "0.3.31"
+tokio = { version = "1.41.1", default-features = false, features = [
+    "io-util",
+    "macros",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+
+quote = "1.0"
+proc-macro2 = "1.0"
+syn = "2.0"
 
 
 [workspace]
-members = ["pacifica", "tests"]
+members = [ "macros","pacifica", "tests"]
+
+exclude = [
+    "examples/counter"
+]
