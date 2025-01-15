@@ -1,3 +1,5 @@
+mod counter_fsm;
+
 use std::future::Future;
 use pacifica_rs::{declare_pacifica_types, AsyncRuntime, NodeId, TypeConfig, Replica};
 
@@ -45,3 +47,4 @@ pub async fn start() {
     let node_id = 13;
 
 }
+

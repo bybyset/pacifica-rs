@@ -54,6 +54,10 @@ pub struct ReplicaOption {
     /// Default 10m
     #[clap(long, default_value = "10MiB", value_parser=parse_bytes_with_unit)]
     pub max_payload_entries_bytes: u64,
+
+    ///
+    #[clap(bool, default_value = "true")]
+    pub log_entry_checksum_enable: bool,
 }
 
 impl Default for ReplicaOption {

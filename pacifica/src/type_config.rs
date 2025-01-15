@@ -1,11 +1,24 @@
 use crate::runtime::AsyncRuntime;
+use crate::{LogStorage, MetaClient, Request, SnapshotStorage};
+use crate::pacifica::{Codec, Response};
 
 pub trait NodeId {}
 
 pub trait TypeConfig {
+
+    type Request: Request;
+    type Response: Response;
+    type RequestCodec: Codec<Self::Request>;
+
     type AsyncRuntime: AsyncRuntime;
 
     type NodeId: NodeId;
+
+    type MetaClient: MetaClient;
+    type LogStorage: LogStorage;
+    type SnapshotStorage: SnapshotStorage;
+
+
 }
 
 pub mod alias {
@@ -17,6 +30,7 @@ pub mod alias {
 
     type RT<C> = AsyncRuntimeOf<C>;
 
+    pub type JoinErrorOf<C> = <RT<C> as AsyncRuntime>::JoinError;
     pub type JoinHandleOf<C, T> = <RT<C> as AsyncRuntime>::JoinHandle<T>;
     pub type InstantOf<C> = <RT<C> as AsyncRuntime>::Instant;
     pub type SleepOf<C> = <RT<C> as AsyncRuntime>::Sleep;

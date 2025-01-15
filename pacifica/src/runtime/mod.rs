@@ -24,6 +24,9 @@ pub use self::watch::Watch;
 pub use self::watch::WatchSender;
 pub use self::watch::WatchReceiver;
 
+pub use self::error::SendError;
+pub use self::error::RecvError;
+
 
 
 pub(crate) mod tokio_impl {

@@ -51,7 +51,8 @@ where
 
             // send tick
             let tick = T::new_tick();
-            let send_res = self.tx.send(tick).await;
+            let send_res = self.tx.send(tick);
+
             if let Err(e) = send_res {
                 tracing::error!("Failed to send tick, may be stopped. err={}", e);
                 break;

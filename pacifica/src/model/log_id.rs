@@ -1,19 +1,21 @@
 use std::fmt::{Display, Formatter};
 
+/// index: monotonically increasing numeric, greater than or equal to 1
+/// term: monotonically increasing numeric, greater than or equal to 1. Increment after every primary change
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Default)]
 pub struct LogId {
-    pub term: u64,
-    pub index: u64,
+    pub term: usize,
+    pub index: usize,
 }
 
 impl Display for LogId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.term, self.index)
+        write!(f, "LogId[term={}, index={}]", self.term, self.index)
     }
 }
 
 impl LogId {
-    pub fn new(term: u64, index: u64) -> Self {
+    pub fn new(term: usize, index: usize) -> Self {
         Self { term, index }
     }
 }

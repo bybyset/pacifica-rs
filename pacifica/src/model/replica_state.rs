@@ -3,10 +3,11 @@
 #[derive(PartialEq, Eq)]
 pub enum ReplicaState {
     ///
-    #[default]
     Primary,
     Secondary,
     Candidate,
+    #[default]
+    Shutdown,
 }
 
 impl ReplicaState {

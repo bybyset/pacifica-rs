@@ -17,6 +17,8 @@ tracing-subscriber = {version = "0.3.19", features = ["env-filter"] }
 tracing-appender = "0.2.3"
 tracing-futures = "0.2.5"
 
+bytes = "1.9.0"
+
 byte-unit = "5.1.4"
 thiserror = "2.0.3"
 anyerror = "0.1.12"
@@ -40,7 +42,7 @@ syn = "2.0"
 
 
 [workspace]
-members = [ "macros","pacifica", "tests"]
+members = ["pacifica", "macros", "extension/segment-logstore", "tests"]
 
 exclude = [
     "examples/counter"

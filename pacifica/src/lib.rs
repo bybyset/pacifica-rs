@@ -1,3 +1,9 @@
+#![feature(unboxed_closures)]
+#![feature(unboxed_closures)]
+#![feature(unboxed_closures)]
+#![feature(unboxed_closures)]
+#![feature(unboxed_closures)]
+
 mod options;
 mod config_cluster;
 mod error;
@@ -6,10 +12,10 @@ mod core;
 
 pub mod model;
 mod storage;
-mod fsm;
+pub mod fsm;
 mod type_config;
 mod runtime;
-mod network;
+mod rpc;
 mod util;
 
 pub use crate::pacifica::Replica;
@@ -27,14 +33,25 @@ pub use crate::fsm::StateMachine;
 
 
 pub use crate::storage::LogStorage;
-pub use crate::storage::SnapshotStorage;
+pub use crate::storage::LogReader;
+pub use crate::storage::LogWriter;
 pub use crate::storage::LogEntryCodec;
+pub use crate::storage::SnapshotStorage;
+pub use crate::storage::StorageError;
+
+
 
 pub use crate::config_cluster::MetaClient;
-pub use crate::network::ReplicaClient;
+pub use crate::rpc::ReplicaClient;
 
 pub use crate::options::ReplicaOption;
 pub use crate::type_config::TypeConfig;
 pub use crate::type_config::NodeId;
 
 pub use crate::runtime::AsyncRuntime;
+
+
+pub use crate::pacifica::Request;
+
+
+

@@ -17,6 +17,8 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-futures = { workspace = true }
 
+bytes = {workspace = true}
+
 byte-unit = { workspace = true }
 thiserror = { workspace = true }
 anyerror = { workspace = true }

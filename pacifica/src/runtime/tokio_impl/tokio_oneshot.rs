@@ -7,7 +7,7 @@ pub struct TokioOneshot;
 impl Oneshot for TokioOneshot {
     type Sender<T: Send> = oneshot::Sender<T>;
     type Receiver<T: Send> = oneshot::Receiver<T>;
-    type ReceiverError = oneshot::RecvError;
+    type ReceiverError = tokio::sync::oneshot::error::RecvError;
 
     fn channel<T>() -> (Self::Sender<T>, Self::Receiver<T>)
     where
