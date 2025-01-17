@@ -1,4 +1,6 @@
 
 pub trait LogReader {
 
+    fn
+
 }

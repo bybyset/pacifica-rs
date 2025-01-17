@@ -1,9 +1,9 @@
 use crate::core::ballot::BallotBox;
-use crate::core::fsm::CommitResult;
+use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
-use crate::core::replicator;
+use crate::core::{operation, replicator};
 use crate::core::replicator::ReplicatorGroup;
 use crate::error::{Fatal, PacificaError};
 use crate::model::{LogEntryPayload, Operation};
@@ -22,17 +22,11 @@ where
     RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
 {
-    // replicator group
-    // ballot box
-    // lease period
-    // log manager
-    ballot_box: BallotBox<C, FSM>,
-    replica_group_agent: Arc<ReplicaGroupAgent<C>>,
+    ballot_box: ReplicaComponent<C, BallotBox<C, FSM>>,
+    replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replicator_group: ReplicatorGroup<C, RC, FSM>,
-
     lease_period_timer: RepeatedTimer<C, Task<C>>,
-
     tx_task: Option<MpscUnboundedSenderOf<C, Task<C>>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
@@ -45,12 +39,13 @@ where
 {
     pub(crate) fn new(
         next_log_index: usize,
-        ballot_box: BallotBox<C, FSM>,
-        replica_group_agent: Arc<ReplicaGroupAgent<C>>,
+        fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+        replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         replica_client: Arc<RC>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C> {
+        let ballot_box = ReplicaComponent::new(BallotBox::new(next_log_index, fsm_caller));
         let replicator_group = ReplicatorGroup::new(replica_client);
         let (tx_tick, rx_tick) = C::mpsc_unbounded();
         let lease_period_timeout = replica_option.lease_period_timeout();
@@ -80,21 +75,34 @@ where
         Ok(())
     }
 
-    fn handle_task(&mut self, task: Operation<C>) -> Result<(), Fatal<C>> {
+
+
+    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
+        self.ballot_box.announce_result(commit_result)
+    }
+
+    /// 协调阶段， 主副本提交一个'空'请求，从副本将于此次请求对齐
+    pub(crate) async fn reconciliation(&self) -> Result<(), Fatal<C>> {
+        let operation = Operation::new_empty();
+        self.commit(operation)?;
+        Ok(())
+    }
+
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
-            Task::Commit { operation } => self.handle_commit_task(operation)?,
+            Task::Commit { operation } => self.handle_commit_task(operation).await?,
+            Task::Tick => {
+
+            }
         }
 
         Ok(())
     }
 
-    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>>{
-        self.ballot_box.announce_result(commit_result)
-    }
     async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), Fatal<C>> {
         //init and append ballot box for the operation
         let log_term = self.replica_group_agent.get_term();
-        let replica_group = self.replica_group_agent.get_replica_group();
+        let replica_group = self.replica_group_agent.get_replica_group().await;
         let log_index_result = self
             .ballot_box
             .initiate_ballot(replica_group, log_term, operation.request, operation.callback)
@@ -119,6 +127,13 @@ where
         }
         Ok(())
     }
+
+    /// 检查从副本状态，并移除故障副本
+    async fn handle_lease_period(&mut self) {
+        self.replica_group_agent.
+
+    }
+
 }
 
 pub(crate) enum Task<C>
@@ -148,11 +163,16 @@ where
     RC: ReplicaClient<C>,
 {
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
-        todo!()
+        // startup ballot box
+        self.ballot_box.startup().await?;
+        // reconciliation
+        self.reconciliation()?;
+        Ok(true)
     }
 
     async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
-        todo!()
+        self.ballot_box.shutdown().await?;
+        Ok(true)
     }
 }
 

@@ -130,6 +130,7 @@ impl<C> ReplicaBuilder<C> {
 impl<C> ReplicaService for Replica<C> {
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()> {
         todo!()
+
     }
 
     async fn handle_install_snapshot_request(

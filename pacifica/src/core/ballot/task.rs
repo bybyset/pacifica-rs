@@ -12,7 +12,7 @@ where C: TypeConfig {
         ballot: Ballot,
         primary_term: usize,
         request: Option<C::Request>,
-        result_sender: ResultSender<C, C::Response, PacificaError<C>>,
+        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
         init_result_sender: OneshotSenderOf<C, Result<usize, BallotError>>
     },
 

@@ -190,7 +190,7 @@ where
     }
 
     /// get last log index, return 0 if nothing
-    pub(crate) fn get_last_log_index(&self) -> u64 {
+    pub(crate) fn get_last_log_index(&self) -> usize {
         todo!()
     }
 }
@@ -200,7 +200,13 @@ where
     C: TypeConfig,
 {
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
-        todo!()
+        let log_reader = self.log_storage.open_reader().await;
+
+        // set first log index
+        // set last log index
+
+
+        Ok(true)
     }
 
     async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {

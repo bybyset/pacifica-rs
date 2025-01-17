@@ -2,6 +2,7 @@ use crate::core::ballot::error::BallotError;
 use crate::core::ballot::task::Task;
 use crate::core::ballot::{ballot_box, Ballot};
 use crate::core::fsm::{CommitResult, StateMachineCaller};
+use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::ResultSender;
 use crate::error::{Fatal, PacificaError};
@@ -11,6 +12,7 @@ use crate::type_config::alias::{
 };
 use crate::util::send_result;
 use crate::{ReplicaGroup, ReplicaId, StateMachine, TypeConfig};
+use futures::{SinkExt, TryFutureExt};
 use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::ops::Deref;
@@ -23,81 +25,31 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    fsm_caller: Arc<StateMachineCaller<C, FSM>>,
-
-    last_committed_index: AtomicUsize,
-
+    fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     pending_index: AtomicUsize,
     ballot_queue: VecDeque<BallotContext<C>>,
+    last_committed_index: AtomicUsize,
 
-    tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    loop_handler: Option<JoinHandleOf<C, Result<(), JoinErrorOf<C>>>>,
-    tx_task: Option<MpscUnboundedSenderOf<C, Task<C>>>,
+    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
 impl<C, FSM> BallotBox<C, FSM>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(pending_index: usize, fsm_caller: Arc<StateMachineCaller<C, FSM>>) -> Self {
+    pub(crate) fn new(pending_index: usize, fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>) -> Self {
+        let (tx_task, rx_task) = C::mpsc_unbounded();
         let ballot_box = BallotBox {
             fsm_caller,
-            last_committed_index: AtomicUsize::new(0),
             pending_index: AtomicUsize::new(pending_index),
             ballot_queue: VecDeque::new(),
-            tx_shutdown: Mutex::new(None),
-            loop_handler: None,
-            tx_task: None,
+            last_committed_index: AtomicUsize::new(0),
+            tx_task,
+            rx_task,
         };
 
         ballot_box
-    }
-
-    pub(crate) async fn startup(mut self) -> Result<(), Fatal<C>> {
-        let mut shutdown = self.tx_shutdown.lock().unwrap();
-        if let Some(_) = shutdown {
-            // repeated startup
-            return Ok(());
-        }
-        let (tx_task, rx_task) = C::mpsc_unbounded();
-        let (tx_shutdown, rx_shutdown) = C::oneshot();
-        let loop_handler = C::spawn(self.run_loop(rx_shutdown, rx_task));
-        self.loop_handler.replace(loop_handler);
-        self.tx_task.replace(tx_task);
-        shutdown.replace(tx_shutdown);
-        Ok(())
-    }
-
-    pub(crate) async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
-        Ok(())
-    }
-
-    async fn run_loop(
-        &mut self,
-        rx_shutdown: OneshotReceiverOf<C, ()>,
-        mut rx_task: MpscUnboundedReceiverOf<C, ()>,
-    ) -> Result<(), Fatal<C>> {
-        loop {
-            futures::select_biased! {
-                _ = rx_shutdown.recv().fuse() => {
-                    tracing::info!("received shutdown signal.");
-                    break;
-                }
-                task = rx_task.recv().fuse() => {
-                    match task {
-                        Some(task) => {
-                            self.handle_task(task).await?
-                        }
-                        None => {
-                            tracing::warn!("received unexpected task message.");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Initialize the ballot without providing a number (log index) for this vote
@@ -106,7 +58,7 @@ where
         replica_group: ReplicaGroup,
         primary_term: usize,
         request: Option<C::Request>,
-        result_sender: ResultSender<C, C::Response, PacificaError<C>>,
+        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
     ) -> Result<usize, BallotError> {
         let ballot = Ballot::new_by_replica_group(replica_group);
         let (callback, init_result_sender) = C::oneshot();
@@ -222,13 +174,21 @@ where
             let start_index = start_log_index - pending_log_index;
             let end_index = end_log_index_inc - pending_log_index;
 
-            let mut requests = vec![];
-            for mut ballot_context in self.ballot_queue.range_mut(start_index..=end_index) {
+            let ballot_context = self.ballot_queue.get_mut(start_log_index);
+            if let Some(ballot_context) = ballot_context {
+                let first_primary_term = ballot_context.primary_term;
                 let request = ballot_context.request.take();
-                let primary_term = ballot_context.primary_term;
+                let mut requests = vec![];
                 requests.push(request);
+                if start_index + 1 <= end_index {
+                    for mut ballot_context in self.ballot_queue.range_mut(start_index + 1..=end_index) {
+                        let request = ballot_context.request.take();
+                        assert_eq!(first_primary_term, ballot_context.primary_term);
+                        requests.push(request);
+                    }
+                }
+                self.fsm_caller.commit_batch(start_log_index, first_primary_term, requests)?;
             }
-            self.fsm_caller.commit_batch(start_log_index, requests)?;
         }
         Ok(())
     }
@@ -238,7 +198,7 @@ where
         ballot: Ballot,
         primary_term: usize,
         request: Option<C::Request>,
-        result_sender: ResultSender<C, C::Response, PacificaError<C>>,
+        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
     ) -> usize {
         self.ballot_queue.push_back(BallotContext {
             ballot,
@@ -259,11 +219,12 @@ where
             if let Some(ballot_context) = self.ballot_queue.pop_front() {
                 self.pending_index.fetch_add(1, Relaxed);
                 // 发送用户定义的异常
-                let send_result =
-                    ballot_context.result_sender.send(result.map_err(|e| PacificaError::UserFsmError { error: e }));
+                if let Some(result_sender) = ballot_context.result_sender {
+                    let send_result = result_sender.send(result.map_err(|e| PacificaError::UserFsmError { error: e }));
 
-                if send_result.is_err() {
-                    // warn
+                    if send_result.is_err() {
+                        // warn
+                    }
                 }
             } else {
                 // warn log
@@ -282,5 +243,53 @@ where
     pub(crate) ballot: Ballot,
     pub(crate) primary_term: usize,
     pub(crate) request: Option<C::Request>,
-    pub(crate) result_sender: ResultSender<C, C::Response, PacificaError<C>>,
+    pub(crate) result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
+}
+
+impl<C, FSM> Lifecycle<C> for BallotBox<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+        Ok(true)
+    }
+
+    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+        //
+        while let Some(ballot_context) = self.ballot_queue.pop_front() {
+            if let Some(result_sender) = ballot_context.result_sender {
+                let _ = result_sender.send(Err(PacificaError::Shutdown)).map_err(|_| Fatal::Shutdown);
+            }
+        }
+        Ok(true)
+    }
+}
+
+impl<C, FSM> Component<C> for BallotBox<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+        loop {
+            futures::select_biased! {
+                _ = rx_shutdown.recv().fuse() => {
+                    tracing::info!("received shutdown signal.");
+                    break;
+                }
+                task = self.rx_task.recv().fuse() => {
+                    match task {
+                        Some(task) => {
+                            self.handle_task(task).await?
+                        }
+                        None => {
+                            tracing::warn!("received unexpected task message.");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

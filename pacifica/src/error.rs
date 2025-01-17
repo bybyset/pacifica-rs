@@ -35,6 +35,8 @@ where C: TypeConfig {
     Fatal(#[from] Fatal<C>),
 
     #[error(transparent)]
-    EncodeError(#[from] EncodeError<C::Request>)
+    EncodeError(#[from] EncodeError<C::Request>),
+
+    Shutdown
 }
 

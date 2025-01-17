@@ -6,8 +6,8 @@ pub(crate) enum NotificationMsg<C>
 where
     C: TypeConfig,
 {
-    SnapshotTick,
-
     SendCommitResult { result: CommitResult<C> },
+
+    CoreStateChange,
 }
 

@@ -70,6 +70,9 @@ where
             Task::SnapshotLoad { callback } => self.handle_snapshot_load(callback).await,
 
             Task::SnapshotSave { callback } => self.handle_task_save_snapshot().await,
+            Task::SnapshotTick => {
+
+            }
         }
     }
 
