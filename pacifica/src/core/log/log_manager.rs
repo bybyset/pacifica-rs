@@ -180,12 +180,12 @@ where
 
     /// get term of LogId(log_index)
     /// return 0 if log_index is 0
-    pub(crate) fn get_log_term_at(&self, log_index: u64) -> Result<u64, LogManagerError> {
+    pub(crate) fn get_log_term_at(&self, log_index: usize) -> usize {
         todo!()
     }
 
     /// get first log index, return 0 if nothing
-    pub(crate) fn get_first_log_index(&self) -> u64 {
+    pub(crate) fn get_first_log_index(&self) -> usize {
         todo!()
     }
 

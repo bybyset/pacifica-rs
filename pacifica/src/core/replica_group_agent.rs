@@ -115,6 +115,21 @@ where
         rx.await
     }
 
+    /// 选举自己做为新的主副本
+    pub(crate) async fn elect_self(&self) -> bool {
+        todo!()
+    }
+
+    pub(crate) async fn remove_secondary(&self, removed: &ReplicaId) -> bool {
+        todo!()
+    }
+
+    pub(crate) async fn add_secondary(&self, replica_id: &ReplicaId) -> bool {
+        todo!()
+    }
+
+
+
     pub(crate) fn primary(&self) -> Option<ReplicaId> {
         todo!()
     }

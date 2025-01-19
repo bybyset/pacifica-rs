@@ -71,6 +71,11 @@ impl ReplicaOption {
         Duration::from_millis(self.grace_period_timeout_ms * self.lease_period_timeout_ratio / 100)
     }
 
+    pub fn grace_period_timeout(&self) -> Duration {
+        Duration::from_millis(self.grace_period_timeout_ms)
+    }
+
+
     pub fn heartbeat_interval(&self) -> Duration {
         Duration::from_millis(self.grace_period_timeout_ms * self.heartbeat_factor / 100)
     }

@@ -47,10 +47,9 @@ where
     ) -> Self<C> {
         let ballot_box = ReplicaComponent::new(BallotBox::new(next_log_index, fsm_caller));
         let replicator_group = ReplicatorGroup::new(replica_client);
-        let (tx_tick, rx_tick) = C::mpsc_unbounded();
         let lease_period_timeout = replica_option.lease_period_timeout();
-        let lease_period_timer = RepeatedTimer::new(lease_period_timeout, tx_tick, false);
         let (tx_task, rx_task) = C::mpsc_unbounded();
+        let lease_period_timer = RepeatedTimer::new(lease_period_timeout, tx_task.clone(), false);
         Self {
             ballot_box,
             replica_group_agent,
@@ -91,7 +90,7 @@ where
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
             Task::Commit { operation } => self.handle_commit_task(operation).await?,
-            Task::Tick => {
+            Task::LeasePeriodCheck => {
 
             }
         }
@@ -142,7 +141,7 @@ where
 {
     Commit { operation: Operation<C> },
 
-    Tick,
+    LeasePeriodCheck,
 }
 
 impl<C> TickFactory for Task<C>
@@ -151,8 +150,8 @@ where
 {
     type Tick = Task<C>;
 
-    fn new_tick() -> Self::Tick {
-        Task::Tick
+    fn new_tick() -> Self::LeasePeriodCheck {
+        Task::LeasePeriodCheck
     }
 }
 
@@ -165,6 +164,7 @@ where
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
         // startup ballot box
         self.ballot_box.startup().await?;
+        self.lease_period_timer.turn_on();
         // reconciliation
         self.reconciliation()?;
         Ok(true)
