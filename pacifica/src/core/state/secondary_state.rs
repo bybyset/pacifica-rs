@@ -1,15 +1,17 @@
+use crate::core::fsm::StateMachineCaller;
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
+use crate::core::log::{LogManager, LogManagerError};
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
+use crate::core::state::append_entries_handler::AppendEntriesHandler;
 use crate::error::Fatal;
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
 use crate::util::{Leased, RepeatedTimer, TickFactory};
-use crate::{ReplicaOption, StateMachine, TypeConfig};
+use crate::{LogEntry, ReplicaOption, StateMachine, TypeConfig};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use crate::core::fsm::StateMachineCaller;
-use crate::core::log::LogManager;
 
 pub(crate) struct SecondaryState<C, FSM>
 where
@@ -22,6 +24,8 @@ where
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+
+    append_entries_handler: AppendEntriesHandler<C, FSM>,
 
     tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
 
@@ -45,6 +49,8 @@ where
         let grace_period = Leased::new(C::now(), grace_period_timeout.clone());
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let grace_period_timer = RepeatedTimer::new(grace_period_timeout, tx_task.clone(), false);
+        let append_entries_handler =
+            AppendEntriesHandler::new(log_manager.clone(), fsm_caller.clone(), replica_group_agent.clone());
 
         Self {
             grace_period,
@@ -52,6 +58,7 @@ where
             fsm_caller,
             log_manager,
             replica_group_agent,
+            append_entries_handler,
             tx_notification,
             tx_task,
             rx_task,
@@ -66,10 +73,8 @@ where
         match task {
             Task::GracePeriodCheck => {
                 self.check_grace_period();
-            },
-            Task::AppendEntries {
-                request
-            } => {
+            }
+            Task::AppendEntries { request } => {
                 self.handle_append_entries_request(request).await?;
             }
         }
@@ -92,38 +97,7 @@ where
         &mut self,
         request: AppendEntriesRequest,
     ) -> Result<AppendEntriesResponse, Fatal<C>> {
-        let version = self.replica_group_agent.get_version();
-        if request.version > version {
-            //
-            tracing::debug!("received higher group version");
-            self.replica_group_agent.force_refresh().await?;
-        }
-
-        let term = self.replica_group_agent.get_term();
-        if request.term < term {
-            tracing::debug!("received lower term");
-            return Ok(AppendEntriesResponse::higher_term(term));
-        }
-
-        self.update_grace_period();
-        let prev_log_index = request.prev_log_id.index;
-        let prev_log_term = request.prev_log_id.term;
-        let local_prev_log_term = self.log_manager.get_log_term_at(prev_log_index);
-
-        if prev_log_term != local_prev_log_term {
-            tracing::debug!("conflict log at index {}", prev_log_index);
-            let last_log_index = self.log_manager.get_last_log_index();
-            return Ok(AppendEntriesResponse::conflict_log(last_log_index));
-        }
-
-        let _ = self.fsm_caller.commit_at(request.committed_index);
-
-        self.log_manager.append_log_entries(request.entries);
-
-
-
-
-        Ok(AppendEntriesResponse::Success)
+        self.append_entries_handler.handle_append_entries_request(request).await
     }
 }
 

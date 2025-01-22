@@ -29,14 +29,16 @@ impl AppendEntriesRequest {
 }
 
 pub enum AppendEntriesResponse {
-    Success,
+    Success { term: usize, last_log_index: usize },
     HigherTerm { term: usize },
-    ConflictLog {
-        last_log_index: usize,
-    }
+    ConflictLog { last_log_index: usize },
 }
 
 impl AppendEntriesResponse {
+    pub fn success(term: usize, last_log_index: usize) -> Self {
+        AppendEntriesResponse::Success { term, last_log_index }
+    }
+
     pub fn higher_term(term: usize) -> Self {
         AppendEntriesResponse::HigherTerm { term }
     }
@@ -44,5 +46,4 @@ impl AppendEntriesResponse {
     pub fn conflict_log(last_log_index: usize) -> Self {
         AppendEntriesResponse::ConflictLog { last_log_index }
     }
-
 }

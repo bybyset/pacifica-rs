@@ -14,6 +14,7 @@ use std::sync::Arc;
 mod candidate_state;
 mod primary_state;
 mod secondary_state;
+mod append_entries_handler;
 
 pub(crate) enum CoreState<C, RC, FSM>
 where

@@ -20,4 +20,6 @@ pub trait LogWriter {
     /// You should ensure that the log is persisted to disk after calling this method.
     /// Otherwise, an error should be returned
     async fn flush(&mut self) -> Result<(), AnyError>;
+
+    async fn close(&mut self) -> Result<(), AnyError>;
 }

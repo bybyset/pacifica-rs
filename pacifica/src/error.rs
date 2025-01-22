@@ -10,9 +10,6 @@ use crate::TypeConfig;
 pub enum Fatal<C>
 where C: TypeConfig
 {
-    #[error(transparent)]
-    StorageError(#[from] StorageError),
-
     /// shutdown normally.
     #[error("has shutdown")]
     Shutdown,

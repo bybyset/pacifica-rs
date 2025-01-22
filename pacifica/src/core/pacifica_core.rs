@@ -73,7 +73,7 @@ where
         let replica_option = Arc::new(replica_option);
 
         let (tx_notification, rx_notification) = C::mpsc_unbounded();
-        let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(log_storage)));
+        let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(log_storage, replica_option.clone())));
         let fsm_caller = Arc::new(ReplicaComponent::new(StateMachineCaller::new(
             fsm,
             log_manager.clone(),

@@ -55,14 +55,3 @@ impl StorageError {
 
 
 }
-
-
-
-
-
-pub enum LogEntryCodecError {
-
-    EncodeError,
-
-    DecodeError,
-}

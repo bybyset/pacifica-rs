@@ -13,6 +13,7 @@ mod replica_group_agent;
 mod state;
 pub mod operation;
 mod lifecycle;
+mod task_sender;
 
 pub(crate) type ResultSender<C, T, E> = OneshotSenderOf<C, Result<T, E>>;
 
