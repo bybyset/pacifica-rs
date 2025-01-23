@@ -11,26 +11,25 @@ pub enum ErrorVerb {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorSubject {
-
     OpenLogWriter,
+    OpenLogReader,
     FlushLogWriter,
-    AppendEntries {
-        index: usize,
-    }
+    AppendEntries { index: usize },
+    TruncatePrefix { first_log_index_kept: usize },
+    TruncateSuffix { last_log_index_kept: usize },
+    ResetLogStorage { next_log_index: usize },
+    GetLogEntry { log_index: usize },
 }
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
-pub struct StorageError
-{
+pub struct StorageError {
     subject: ErrorSubject,
     verb: ErrorVerb,
     source: AnyError,
     backtrace: Option<String>,
 }
 
-
 impl StorageError {
-
     pub fn new(subject: ErrorSubject, verb: ErrorVerb, source: impl Into<AnyError>) -> StorageError {
         Self {
             subject,
@@ -40,18 +39,47 @@ impl StorageError {
         }
     }
 
+    pub fn open_log_reader(source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::OpenLogReader, ErrorVerb::Read, source)
+    }
+
+    pub fn get_log_entry(log_index: usize, source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::GetLogEntry { log_index }, ErrorVerb::Read, source)
+    }
 
     pub fn open_log_writer(source: impl Into<AnyError>) -> Self {
         Self::new(ErrorSubject::OpenLogWriter, ErrorVerb::Write, source)
     }
 
     pub fn append_entries(index: usize, source: impl Into<AnyError>) -> Self {
-        Self::new(ErrorSubject::AppendEntries{index}, ErrorVerb::Write, source)
+        Self::new(ErrorSubject::AppendEntries { index }, ErrorVerb::Write, source)
     }
 
     pub fn flush_log_writer(source: impl Into<AnyError>) -> Self {
         Self::new(ErrorSubject::FlushLogWriter, ErrorVerb::Write, source)
     }
 
+    pub fn truncate_prefix(first_log_index_kept: usize, source: impl Into<AnyError>) -> Self {
+        Self::new(
+            ErrorSubject::TruncatePrefix { first_log_index_kept },
+            ErrorVerb::Write,
+            source,
+        )
+    }
 
+    pub fn truncate_suffix(last_log_index_kept: usize, source: impl Into<AnyError>) -> Self {
+        Self::new(
+            ErrorSubject::TruncateSuffix { last_log_index_kept },
+            ErrorVerb::Write,
+            source,
+        )
+    }
+
+    pub fn reset(next_log_index: usize, source: impl Into<AnyError>) -> Self {
+        Self::new(
+            ErrorSubject::ResetLogStorage { next_log_index },
+            ErrorVerb::Write,
+            source,
+        )
+    }
 }

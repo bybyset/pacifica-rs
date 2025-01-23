@@ -13,6 +13,10 @@ where C: TypeConfig
     /// shutdown normally.
     #[error("has shutdown")]
     Shutdown,
+
+
+    StartupError(#[from] AnyError)
+
 }
 
 /// PacificaError is returned by API methods of `Replica`.

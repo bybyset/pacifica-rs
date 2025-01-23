@@ -10,5 +10,6 @@ pub use self::log_entry::LogEntryPayload;
 pub use self::replica_group::ReplicaGroup;
 pub use self::replica_id::ReplicaId;
 pub use self::replica_state::ReplicaState;
-pub use crate::core::operation::Operation;
 
+pub use self::log_id::NOT_FOUND_TERM;
+pub use self::log_id::NOT_FOUND_INDEX;

@@ -34,6 +34,15 @@ pub struct ReplicaOption {
     #[clap(long, default_value = "180000")]
     pub snapshot_timeout_ms: u64,
 
+    /// After the snapshot is executed, the op logs that have been merged into
+    /// the snapshot image will be cleaned up. We allow a specified number of
+    /// op logs to remain without cleaning them, which reduces the cost of
+    /// synchronizing the snapshot image.
+    ///
+    /// Default 32
+    #[clap(long, default_value = "32")]
+    pub snapshot_reserved_entry_num: u32,
+
     /// Take recover periodically for Candidate, in milliseconds since the last recover.
     ///
     /// Default 30s
@@ -58,6 +67,8 @@ pub struct ReplicaOption {
     ///
     #[clap(bool, default_value = "true")]
     pub log_entry_checksum_enable: bool,
+
+
 }
 
 impl Default for ReplicaOption {

@@ -28,6 +28,7 @@ futures = { workspace = true }
 tokio = { workspace = true, optional = true }
 
 pacifica-rs-macros = { path = "../macros" }
+log = "0.4.22"
 
 
 [features]

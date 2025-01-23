@@ -7,7 +7,7 @@ where C: TypeConfig {
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
     NotFoundLogEntry {
-        log_index: u64
+        log_index: usize
     },
     ConflictLog,
     #[error(transparent)]

@@ -549,6 +549,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures",
+ "log",
  "pacifica-rs-macros",
  "thiserror 2.0.3",
  "tokio",
