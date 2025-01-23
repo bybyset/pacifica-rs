@@ -257,7 +257,7 @@ where
         match prev_log_term {
             Ok(prev_log_term) => {
                 let prev_log_id = LogId::new(prev_log_term, prev_log_index);
-                let committed_index = self.fsm_caller.get_committed_index();
+                let committed_index = self.fsm_caller.get_committed_log_index();
                 let term = self.replica_group_agent.get_term();
                 let version = self.replica_group_agent.get_version();
                 let primary_id = self.primary_id.clone();

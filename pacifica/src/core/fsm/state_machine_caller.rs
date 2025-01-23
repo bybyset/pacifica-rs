@@ -6,7 +6,7 @@ use crate::core::notification_msg::NotificationMsg;
 use crate::core::{Command, ResultSender};
 use crate::error::Fatal;
 use crate::fsm::Entry;
-use crate::model::{LogEntryPayload, Operation};
+use crate::model::{LogEntryPayload};
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::SnapshotReader;
@@ -107,8 +107,8 @@ where
 
     pub(crate) async fn on_snapshot_save(
         &self,
-        snapshot_writer: &C::SnapshotStorage::Writer,
-    ) -> Result<(), StateMachineError<C>> {
+        snapshot_writer: &mut C::SnapshotStorage::Writer,
+    ) -> Result<LogId, StateMachineError<C>> {
         let tx_task = self.check_shutdown_for_task()?;
         let (callback, rx_result) = C::oneshot();
         let _ = tx_task
@@ -259,7 +259,7 @@ where
         })
     }
 
-    pub(crate) fn get_committed_index(&self) -> usize {
+    pub(crate) fn get_committed_log_index(&self) -> usize {
         self.committed_index.load(Ordering::Relaxed)
     }
 

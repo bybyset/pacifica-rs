@@ -11,8 +11,9 @@ pub enum ErrorVerb {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorSubject {
-    OpenLogWriter,
-    OpenLogReader,
+    OpenWriter,
+    OpenReader,
+
     FlushLogWriter,
     AppendEntries { index: usize },
     TruncatePrefix { first_log_index_kept: usize },
@@ -39,16 +40,16 @@ impl StorageError {
         }
     }
 
-    pub fn open_log_reader(source: impl Into<AnyError>) -> Self {
-        Self::new(ErrorSubject::OpenLogReader, ErrorVerb::Read, source)
+    pub fn open_reader(source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::OpenReader, ErrorVerb::Read, source)
     }
 
     pub fn get_log_entry(log_index: usize, source: impl Into<AnyError>) -> Self {
         Self::new(ErrorSubject::GetLogEntry { log_index }, ErrorVerb::Read, source)
     }
 
-    pub fn open_log_writer(source: impl Into<AnyError>) -> Self {
-        Self::new(ErrorSubject::OpenLogWriter, ErrorVerb::Write, source)
+    pub fn open_writer(source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::OpenWriter, ErrorVerb::Write, source)
     }
 
     pub fn append_entries(index: usize, source: impl Into<AnyError>) -> Self {

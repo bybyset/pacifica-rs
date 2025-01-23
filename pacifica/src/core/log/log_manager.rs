@@ -12,11 +12,9 @@ use crate::util::{send_result, Checksum};
 use crate::{LogEntry, LogId, LogStorage, ReplicaOption, StorageError, TypeConfig};
 use crate::{LogReader, LogWriter};
 use anyerror::AnyError;
-use futures::TryFutureExt;
-use log::log;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 
 pub(crate) struct LogManager<C>
 where
@@ -107,7 +105,7 @@ where
     /// append日志至存储
     /// 异常后返回StorageError
     async fn append_to_storage(&self, log_entries: Vec<LogEntry>) -> Result<(), StorageError> {
-        let mut writer = self.log_storage.open_writer().await.map_err(|e| StorageError::open_log_writer(e))?;
+        let mut writer = self.log_storage.open_writer().await.map_err(|e| StorageError::open_writer(e))?;
         let write_result = self.write_log_entries(&mut writer, &log_entries).await;
         let flush_result = writer.flush().await;
         if let Err(e) = flush_result {
@@ -126,7 +124,7 @@ where
             return Ok(());
         }
         let log_writer = self.log_storage.open_writer().await;
-        let mut log_writer = log_writer.map_err(|e| StorageError::open_log_writer(e))?;
+        let mut log_writer = log_writer.map_err(|e| StorageError::open_writer(e))?;
         let first_log_index = log_writer
             .truncate_prefix(first_log_index_kept)
             .await
@@ -153,7 +151,7 @@ where
             return Ok(());
         }
         let log_writer = self.log_storage.open_writer().await;
-        let mut log_writer = log_writer.map_err(|e| StorageError::open_log_writer(e))?;
+        let mut log_writer = log_writer.map_err(|e| StorageError::open_writer(e))?;
         let last_log_index = log_writer
             .truncate_suffix(last_log_index_kept)
             .await
@@ -177,7 +175,7 @@ where
 
     async fn handle_reset(&mut self, next_log_index: usize) -> Result<(), LogManagerError<C>> {
         let log_writer = self.log_storage.open_writer().await;
-        let mut log_writer = log_writer.map_err(|e| StorageError::open_log_writer(e))?;
+        let mut log_writer = log_writer.map_err(|e| StorageError::open_writer(e))?;
         let _ = log_writer.reset(next_log_index).await.map_err(|e| StorageError::reset(next_log_index, e))?;
         self.first_log_index.store(NOT_FOUND_INDEX, Ordering::Relaxed);
         self.last_log_index.store(NOT_FOUND_INDEX, Ordering::Relaxed);
@@ -217,13 +215,13 @@ where
     }
 
     async fn get_log_term_from_storage(&self, log_index: usize) -> Result<Option<usize>, LogManagerError<C>> {
-        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_log_reader(e))?;
+        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
         let term = log_reader.get_log_term(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
         Ok(term)
     }
 
     async fn get_log_entry_from_storage(&self, log_index: usize) -> Result<Option<LogEntry>, LogManagerError<C>> {
-        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_log_reader(e))?;
+        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
         let log_entry = log_reader.get_log_entry(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
         Ok(log_entry)
     }

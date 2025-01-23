@@ -1,6 +1,6 @@
 use crate::core::fsm::StateMachineError;
 use crate::core::log::LogManagerError;
-use crate::TypeConfig;
+use crate::{StorageError, TypeConfig};
 
 ///
 ///
@@ -8,18 +8,13 @@ use crate::TypeConfig;
 pub(crate) enum SnapshotError<C>
 where C: TypeConfig {
 
-    OpenReader,
-
-    OpenWriter,
-
     #[error(transparent)]
     StateMachineError(#[from] StateMachineError<C>),
 
     #[error(transparent)]
-    LogManagerError(#[from] LogManagerError),
+    LogManagerError(#[from] LogManagerError<C>),
 
-    Shutdown {
-        msg: String,
-    }
+    #[error(transparent)]
+    StorageError(#[from] StorageError),
 
 }

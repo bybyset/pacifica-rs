@@ -90,7 +90,7 @@ where
                 return Err(LogManagerError::ConflictLog);
             }
             let last = log_entries.last().unwrap();
-            let committed_index = self.fsm_caller.get_committed_index();
+            let committed_index = self.fsm_caller.get_committed_log_index();
             if last.log_id.index <= committed_index {
                 // 追加已提交的日志
                 return Err(LogManagerError::ConflictLog);

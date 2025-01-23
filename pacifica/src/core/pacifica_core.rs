@@ -211,7 +211,6 @@ where
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
         // startup log_manager
         self.log_manager.startup().await?;
-
         // startup fsm_caller
         self.fsm_caller.startup().await?;
 

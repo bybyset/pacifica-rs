@@ -15,6 +15,7 @@ use crate::util::{RepeatedTimer, TickFactory};
 use crate::{LogEntry, LogId, ReplicaClient, ReplicaGroup, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use crate::core::operation::Operation;
 
 pub(crate) struct PrimaryState<C, RC, FSM>
 where

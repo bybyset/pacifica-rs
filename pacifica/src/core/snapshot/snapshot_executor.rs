@@ -9,7 +9,7 @@ use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::{send_result, RepeatedTimer, TickFactory};
-use crate::{LogId, ReplicaOption, StateMachine, TypeConfig};
+use crate::{LogId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use futures::TryStreamExt;
@@ -17,6 +17,7 @@ use tokio::io::AsyncWriteExt;
 use tracing_futures::Instrument;
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::notification_msg::{NotificationMsg};
+use crate::core::task_sender::TaskSender;
 use crate::error::Fatal;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
@@ -27,12 +28,12 @@ where
     snapshot_storage: C::SnapshotStorage,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
-    last_snapshot_log_id: Option<LogId>,
-
-    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
-    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
-
+    last_snapshot_log_id: LogId,
     snapshot_timer: RepeatedTimer<C, SnapshotTick<C>>,
+
+    tx_task: TaskSender<C, Task<C>>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    replica_option: Arc<ReplicaOption>,
 }
 
 impl<C, FSM> SnapshotExecutor<C, FSM>
@@ -41,10 +42,10 @@ where
     FSM: StateMachine<C>,
 {
     pub(crate) fn new(
-        replica_option: Arc<ReplicaOption>,
         snapshot_storage: C::SnapshotStorage,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+        replica_option: Arc<ReplicaOption>,
     ) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let snapshot_timer = RepeatedTimer::new(
@@ -56,35 +57,53 @@ where
             snapshot_storage,
             log_manager,
             fsm_caller,
-            last_snapshot_log_id: None,
+            last_snapshot_log_id: LogId::default(),
             snapshot_timer,
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
             rx_task,
-
+            replica_option
         }
     }
 
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
-            Task::SnapshotLoad { callback } => self.handle_snapshot_load(callback).await,
-
-            Task::SnapshotSave { callback } => self.handle_task_save_snapshot().await,
+            Task::SnapshotLoad { callback } => {
+                let result = self.do_snapshot_load().await;
+                let _ = send_result(callback, result);
+            }
+            Task::SnapshotSave { callback } => {
+                let result = self.do_snapshot_save().await;
+                let _ = send_result(callback, result);
+            },
             Task::SnapshotTick => {
-
+                let _ = self.do_snapshot_save().await;
             }
         }
+        Ok(())
     }
 
-    async fn handle_snapshot_load(&mut self, callback: ResultSender<C, LogId, SnapshotError<C>>) -> Result<(), Fatal> {
-        let result = self.do_snapshot_load();
-        send_result(callback, result)
+    async fn do_snapshot_save(&mut self) -> Result<LogId, SnapshotError<C>> {
+        let snapshot_log_index_margin = self.replica_option.snapshot_log_index_margin;
+        let committed_log_index = self.fsm_caller.get_committed_log_index();
+        let distance = committed_log_index - self.last_snapshot_log_id.index;
+        if distance <= snapshot_log_index_margin {
+            return Ok(self.last_snapshot_log_id.clone());
+        }
+        let mut writer = self.snapshot_storage.open_writer().await.map_err(|e| {
+            StorageError::open_writer(e)
+        })?;
+        let snapshot_log_id = self.fsm_caller.on_snapshot_save(&mut writer).await?;
+        self.on_snapshot_success(snapshot_log_id.clone()).await?;
+        Ok(snapshot_log_id)
     }
 
     async fn do_snapshot_load(&mut self) -> Result<LogId, SnapshotError<C>> {
         // open snapshot reader
         let snapshot_reader =
-            self.snapshot_storage.open_snapshot_reader().await.map_err(|_| SnapshotError::OpenReader)?;
+            self.snapshot_storage.open_reader().await.map_err(|e| {
+                StorageError::open_reader(e)
+            })?;
         let snapshot_meta = snapshot_reader.get_snapshot_meta().map_err(|_| SnapshotError::OpenReader)?;
         let snapshot_log_id = snapshot_meta.get_snapshot_log_id();
         // fsm on snapshot load
@@ -93,56 +112,49 @@ where
             .await
             .map_err(|err| SnapshotError::StateMachineError(err))?;
         //
-        self.on_snapshot_load_done(snapshot_log_id.clone()).await?;
-
+        self.on_snapshot_success(snapshot_log_id.clone()).await?;
         Ok(snapshot_log_id)
     }
 
-    async fn on_snapshot_load_done(&mut self, snapshot_log_id: LogId) -> Result<(), SnapshotError<C>> {
+    /// success to snapshot load/save
+    async fn on_snapshot_success(&mut self, snapshot_log_id: LogId) -> Result<(), SnapshotError<C>> {
         // set last_snapshot_log_id
-        self.last_snapshot_log_id.replace(snapshot_log_id);
+        self.last_snapshot_log_id = snapshot_log_id.clone();
         // trigger log manager on snapshot
         self.log_manager
             .on_snapshot(snapshot_log_id)
             .await
             .map_err(|err| SnapshotError::LogManagerError(err))?;
-
         Ok(())
     }
 
 
     async fn load_snapshot(&self) -> Result<LogId, SnapshotError<C>> {
-        let tx_task = self.check_shutdown_for_task()?;
         let (callback, rx_result) = C::oneshot();
-        let r = tx_task.send(Task::SnapshotLoad {
+        let _ = self.tx_task.send(Task::SnapshotLoad {
             callback
-        }).map_err(|_| {
-            SnapshotError::Shutdown {
-                msg: "shutdown or not starting".to_string(),
-            }
-        });
+        })?;
         let snapshot_log_id = rx_result.await?;
         Ok(snapshot_log_id)
     }
 
-    pub(crate) async fn do_snapshot(&self) -> Result<(), SnapshotError> {
-        self.snapshot_storage.
+    pub(crate) async fn snapshot(&self) -> Result<LogId, SnapshotError<C>> {
+        let (callback, rx) = C::oneshot();
+        self.tx_task.send(Task::SnapshotSave {
+            callback
+        })?;
+        let log_id = rx.await?;
+        log_id
+    }
+
+    pub(crate) async fn install_snapshot(&self) -> Result<(), SnapshotError<C>> {
         todo!()
     }
 
-    pub(crate) async fn install_snapshot(&self) -> Result<(), SnapshotError> {
-        todo!()
+    pub(crate) fn get_last_snapshot_log_id(&self) -> LogId {
+        self.last_snapshot_log_id.clone()
     }
 
-    pub(crate) fn get_last_snapshot_log_id(&self) -> Result<LogId, SnapshotError> {
-        todo!()
-    }
-
-    fn check_shutdown_for_task(&self) -> Result<&MpscUnboundedSenderOf<C, Task<C>>, SnapshotError<C>> {
-        self.tx_task.as_ref().ok_or_else(|| SnapshotError::Shutdown {
-            msg: "shutdown or not starting".to_string(),
-        })
-    }
 }
 
 impl<C, FSM> Lifecycle<C> for SnapshotExecutor<C, FSM>
@@ -152,11 +164,15 @@ where
 {
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
         // first load snapshot
-        self.load_snapshot().await?
+        self.load_snapshot().await?;
+        // start snapshot timer
+        self.snapshot_timer.turn_on();
+        Ok(true)
     }
 
     async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
-        todo!()
+        self.snapshot_timer.shutdown().await?;
+        Ok(true)
     }
 }
 

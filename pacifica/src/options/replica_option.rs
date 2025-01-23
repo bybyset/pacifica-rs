@@ -43,6 +43,16 @@ pub struct ReplicaOption {
     #[clap(long, default_value = "32")]
     pub snapshot_reserved_entry_num: u32,
 
+    /// When the snapshot is finished, the data in memory of the state machine
+    /// is flushed to disk. We provide this option(snapshot_log_index_margin) to ensure
+    /// that snapshot_log_index_margin "write" op logs are not flushed.
+    /// This is an optional optimization, because reading data from memory
+    /// will give better performance than reading data from disk.
+    ///
+    /// Default 0
+    #[clap(long, default_value = "0")]
+    pub snapshot_log_index_margin: usize,
+
     /// Take recover periodically for Candidate, in milliseconds since the last recover.
     ///
     /// Default 30s
@@ -67,8 +77,6 @@ pub struct ReplicaOption {
     ///
     #[clap(bool, default_value = "true")]
     pub log_entry_checksum_enable: bool,
-
-
 }
 
 impl Default for ReplicaOption {
@@ -85,7 +93,6 @@ impl ReplicaOption {
     pub fn grace_period_timeout(&self) -> Duration {
         Duration::from_millis(self.grace_period_timeout_ms)
     }
-
 
     pub fn heartbeat_interval(&self) -> Duration {
         Duration::from_millis(self.grace_period_timeout_ms * self.heartbeat_factor / 100)
