@@ -1,14 +1,25 @@
-use crate::core::fsm::task::Task;
-use crate::runtime::SendError;
-use crate::TypeConfig;
+use anyerror::AnyError;
+use crate::error::Fatal;
+use crate::{LogId, TypeConfig};
 
 pub(crate) enum StateMachineError<C>
 where
     C: TypeConfig,
 {
-    Send { e: SendError<Task<C>> },
+    #[error(transparent)]
+    Fatal(#[from] Fatal<C>),
 
-    Shutdown { msg: String },
+    SnapshotLoad {
+        source: AnyError,
+    },
 
-    UserError,
+    SnapshotSave {
+        source: AnyError,
+    },
+
+    IllegalSnapshot {
+        committed_log_id: LogId,
+        snapshot_log_id: LogId,
+    }
+
 }

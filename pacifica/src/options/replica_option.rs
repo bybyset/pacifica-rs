@@ -55,8 +55,8 @@ pub struct ReplicaOption {
 
     /// Take recover periodically for Candidate, in milliseconds since the last recover.
     ///
-    /// Default 30s
-    #[clap(long, default_value = "30000")]
+    /// Default 60s
+    #[clap(long, default_value = "60000")]
     pub recover_timeout_ms: u64,
 
     /// Recover Request timeout ms
@@ -96,5 +96,9 @@ impl ReplicaOption {
 
     pub fn heartbeat_interval(&self) -> Duration {
         Duration::from_millis(self.grace_period_timeout_ms * self.heartbeat_factor / 100)
+    }
+
+    pub fn recover_interval(&self) -> Duration {
+        Duration::from_millis(self.recover_timeout_ms)
     }
 }

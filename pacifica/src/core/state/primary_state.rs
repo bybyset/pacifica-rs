@@ -6,7 +6,7 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::{operation, replicator};
 use crate::core::replicator::ReplicatorGroup;
 use crate::error::{Fatal, PacificaError};
-use crate::model::{LogEntryPayload, Operation};
+use crate::model::{LogEntryPayload};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{
     JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
@@ -16,6 +16,8 @@ use crate::{LogEntry, LogId, ReplicaClient, ReplicaGroup, ReplicaOption, StateMa
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use crate::core::operation::Operation;
+use crate::core::task_sender::TaskSender;
+use crate::rpc::message::ReplicaRecoverRequest;
 
 pub(crate) struct PrimaryState<C, RC, FSM>
 where
@@ -28,7 +30,7 @@ where
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replicator_group: ReplicatorGroup<C, RC, FSM>,
     lease_period_timer: RepeatedTimer<C, Task<C>>,
-    tx_task: Option<MpscUnboundedSenderOf<C, Task<C>>>,
+    tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
@@ -57,19 +59,12 @@ where
             log_manager,
             replicator_group,
             lease_period_timer,
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
             rx_task,
         }
     }
 
-    fn submit_task(&self, task: Task<C>) -> Result<(), Fatal<C>> {
-        if let Some(tx_task) = self.tx_task.as_ref() {
-            tx_task.send(task).map_err(|e| Fatal::Shutdown)?;
-            Ok(())
-        } else {
-            Err(Fatal::Shutdown)
-        }
-    }
+
     pub(crate) fn commit(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
         self.submit_task(Task::Commit { operation })?;
         Ok(())
@@ -92,6 +87,11 @@ where
         match task {
             Task::Commit { operation } => self.handle_commit_task(operation).await?,
             Task::LeasePeriodCheck => {
+
+            }
+            Task::ReplicaRecover {
+                request
+            } => {
 
             }
         }
@@ -143,6 +143,10 @@ where
     Commit { operation: Operation<C> },
 
     LeasePeriodCheck,
+
+    ReplicaRecover {
+        request: ReplicaRecoverRequest
+    }
 }
 
 impl<C> TickFactory for Task<C>

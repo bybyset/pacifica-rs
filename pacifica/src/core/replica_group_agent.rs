@@ -1,3 +1,4 @@
+use std::f32::consts::E;
 use crate::core::fsm::StateMachineError;
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::notification_msg::NotificationMsg;
@@ -8,16 +9,19 @@ use crate::type_config::alias::{MpscUnboundedReceiverOf, MpscUnboundedSenderOf, 
 use crate::util::send_result;
 use crate::{MetaClient, ReplicaGroup, ReplicaId, ReplicaState, TypeConfig};
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use crate::core::task_sender::TaskSender;
 
 pub(crate) struct ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    group_name: String,
-    meta_client: Arc<C::MetaClient>,
-    replica_group: Option<ReplicaGroup>,
 
-    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
+    current_id: ReplicaId<C>,
+    meta_client: C::MetaClient,
+    replica_group: Option<ReplicaGroup<C>>,
+
+    tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
@@ -25,43 +29,54 @@ impl<C> ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(group_name: String, meta_client: Arc<C::MetaClient>) -> Self {
+    pub(crate) fn new(current_id: ReplicaId<C>, meta_client: C::MetaClient) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         ReplicaGroupAgent {
-            group_name,
+            current_id,
             replica_group: None,
             meta_client,
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
             rx_task,
         }
     }
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
-            Task::Refresh { callback } => {
-                self.handle_refresh().await;
-                send_result(callback, Ok(()))?;
-            }
             Task::ForceRefresh { callback } => {
                 let _ = self.replica_group.take();
                 self.handle_refresh().await;
                 send_result(callback, Ok(()))?;
+            },
+            Task::RefreshAndGet { callback } => {
+                self.handle_refresh().await;
+
             }
         }
         Ok(())
     }
 
-    async fn handle_refresh(&mut self) {
-        if self.replica_group.is_none() {
+    async fn handle_refresh(&mut self) -> Result<ReplicaGroup<C>, ()>{
+        while self.replica_group.is_none() {
             let replica_group = self.get_replica_group_by_meta().await;
             if let Some(replica_group) = replica_group {
                 self.replica_group.replace(replica_group);
+            } else {
+                C::sleep_until(tokio::time::sleep(Duration::from_secs(5)));
             }
         }
+        let result = match self.replica_group() {
+            Some(replica_group) => {
+                Ok(replica_group.clone())
+            },
+            None => {
+                Err(())
+            }
+        };
+        result
     }
 
     /// 强制刷新
-    async fn get_replica_group_by_meta(&self) -> Option<ReplicaGroup> {
+    async fn get_replica_group_by_meta(&self) -> Option<ReplicaGroup<C>> {
         let result = self.meta_client.get_replica_group(&self.group_name).await;
         match result {
             Ok(replica_group) => Some(replica_group),
@@ -72,7 +87,19 @@ where
         }
     }
 
-    pub(crate) async fn get_replica_group(&self) -> Option<&ReplicaGroup> {
+
+    async fn get_replica_group_and_wait(&self) -> &ReplicaGroup<C> {
+        if let Some(replica_group) = self.replica_group.as_ref() {
+            return replica_group;
+        };
+
+
+
+
+
+    }
+
+    pub(crate) async fn get_replica_group(&self) -> Option<&ReplicaGroup<C>> {
         let result = match &self.replica_group {
             Some(replica_group) => Some(replica_group),
             None => {
@@ -87,7 +114,7 @@ where
         result
     }
 
-    pub(crate) async fn get_state(&self, replica_id: &ReplicaId) -> ReplicaState {
+    pub(crate) async fn get_state(&self, replica_id: &ReplicaId<C>) -> ReplicaState {
         let replica_group = self.get_replica_group().await;
         if let Some(replica_group) = replica_group {
             if replica_group.primary.eq(replica_id) {
@@ -120,21 +147,25 @@ where
         todo!()
     }
 
-    pub(crate) async fn remove_secondary(&self, removed: &ReplicaId) -> bool {
+    pub(crate) async fn remove_secondary(&self, removed: &ReplicaId<C>) -> bool {
         todo!()
     }
 
-    pub(crate) async fn add_secondary(&self, replica_id: &ReplicaId) -> bool {
+    pub(crate) async fn add_secondary(&self, replica_id: &ReplicaId<C>) -> bool {
         todo!()
     }
 
 
+    pub(crate) fn get_current_id(&self) -> ReplicaId<C> {
+        self.current_id.clone()
+    }
 
-    pub(crate) fn primary(&self) -> Option<ReplicaId> {
+    pub(crate) fn primary(&self) -> ReplicaId<C> {
+
         todo!()
     }
 
-    pub(crate) fn secondaries(&self) -> Vec<ReplicaId> {
+    pub(crate) fn secondaries(&self) -> Vec<ReplicaId<C>> {
         todo!()
     }
 
@@ -188,6 +219,8 @@ where
 }
 
 pub(crate) enum Task<C> {
-    Refresh { callback: ResultSender<C, (), ()> },
     ForceRefresh { callback: ResultSender<C, (), ()> },
+    RefreshAndGet {
+        callback: ResultSender<C, ReplicaGroup<C>, ()>,
+    }
 }

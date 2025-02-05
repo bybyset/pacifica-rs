@@ -261,8 +261,19 @@ where
             return Err(LogManagerError::NotFoundLogEntry { log_index });
         }
         let log_entry = self.get_log_entry_from_storage(log_index).await?;
+
         let result = match log_entry {
-            Some(log_entry) => Ok(log_entry),
+            Some(log_entry) => {
+                if self.replica_option.log_entry_checksum_enable && log_entry.is_corrupted() {
+                    return Err(
+                        LogManagerError::CorruptedLogEntry {
+                            expect: log_entry.check_sum.unwrap(),
+                            actual: log_entry.checksum(),
+                        }
+                    )
+                };
+                Ok(log_entry)
+            },
             None => Err(LogManagerError::NotFoundLogEntry { log_index }),
         };
         result

@@ -10,14 +10,13 @@ use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::CoreState;
 use crate::error::{Fatal, PacificaError};
-use crate::model::Operation;
 use crate::rpc::message::AppendEntriesRequest;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::RepeatedTimer;
-use crate::{LogEntryCodec, LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine, TypeConfig};
+use crate::{LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine, TypeConfig};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -29,7 +28,7 @@ where
     FSM: StateMachine<C>,
     LS: LogStorage,
 {
-    replica_id: ReplicaId,
+    replica_id: ReplicaId<C>,
     rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
 
     tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
@@ -51,17 +50,16 @@ where
     core_state: RefCell<CoreState<C, RC, FSM>>,
 }
 
-impl<C, RC, FSM, LS, LEC, SS> ReplicaCore<C, RC, FSM, LS>
+impl<C, RC, FSM, LS, SS> ReplicaCore<C, RC, FSM, LS>
 where
     C: TypeConfig,
     RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
     LS: LogStorage,
-    LEC: LogEntryCodec,
     SS: SnapshotStorage,
 {
     pub(crate) fn new(
-        replica_id: ReplicaId,
+        replica_id: ReplicaId<C>,
         rx_inner: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
         fsm: FSM,
         log_storage: LS,
@@ -80,17 +78,17 @@ where
             tx_notification.clone(),
         )));
         let snapshot_executor = Arc::new(ReplicaComponent::new(SnapshotExecutor::new(
-            replica_option.clone(),
             snapshot_storage,
             log_manager.clone(),
             fsm_caller.clone(),
+            replica_option.clone()
         )));
 
         let meta_client = Arc::new(meta_client);
         let replica_client = Arc::new(replica_client);
 
         let replica_group = Arc::new(ReplicaComponent::new(ReplicaGroupAgent::new(
-            replica_id.group_name.clone(),
+            replica_id.clone(),
             meta_client.clone(),
         )));
 

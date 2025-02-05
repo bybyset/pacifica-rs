@@ -9,6 +9,11 @@ where C: TypeConfig {
     NotFoundLogEntry {
         log_index: usize
     },
+    // 损坏的日志，checksum不一致
+    CorruptedLogEntry {
+        expect: u64,
+        actual: u64
+    },
     ConflictLog,
     #[error(transparent)]
     StorageError(#[from] StorageError),

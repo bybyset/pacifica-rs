@@ -3,16 +3,18 @@ use crate::core::fsm::{CommitResult, StateMachineError};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
+use crate::core::task_sender::TaskSender;
 use crate::core::{Command, ResultSender};
-use crate::error::Fatal;
+use crate::error::{Fatal, PacificaError};
 use crate::fsm::Entry;
-use crate::model::{LogEntryPayload};
+use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
-use crate::storage::SnapshotReader;
+use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
+use crate::util::{send_result, Checksum};
 use crate::{LogId, StateMachine, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -24,13 +26,15 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    last_commit_at: AtomicUsize,
-    committed_index: AtomicUsize,
+    committed_log_index: AtomicUsize,
+    committed_log_id: LogId,
     fsm: FSM,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
 
-    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
+    fatal: Option<PacificaError<C>>,
+
+    tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
@@ -44,14 +48,14 @@ where
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
     ) -> Self {
-        let committed_index = AtomicUsize::new(0);
-        let last_commit_at = AtomicUsize::new(0);
+        let committed_log_index = AtomicUsize::new(0);
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let mut fsm_caller = StateMachineCaller {
-            last_commit_at,
-            committed_index,
+            committed_log_index,
+            committed_log_id: LogId::default(),
             fsm,
             log_manager,
+            fatal: None,
             tx_notification,
             tx_task,
             rx_task,
@@ -59,9 +63,8 @@ where
         fsm_caller
     }
 
-    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), Fatal<C>> {
-        let tx_task = self.check_shutdown_for_task()?;
-        tx_task.send(Task::CommitAt { log_index }).map_err(|e| Fatal::Shutdown)?;
+    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), StateMachineError<C>> {
+        let _ = self.tx_task.send(Task::CommitAt { log_index })?;
         Ok(())
     }
 
@@ -71,15 +74,40 @@ where
         primary_term: usize,
         requests: Vec<Option<C::Request>>,
     ) -> Result<(), Fatal<C>> {
-        let tx_task = self.check_shutdown_for_task()?;
-        tx_task
-            .send(Task::CommitBatch {
-                start_log_index,
-                primary_term,
-                requests,
-            })
-            .map_err(|e| Fatal::Shutdown)?;
+        self.tx_task.send(Task::CommitBatch {
+            start_log_index,
+            primary_term,
+            requests,
+        })?;
         Ok(())
+    }
+
+    pub(crate) async fn on_snapshot_save(
+        &self,
+        snapshot_writer: C::SnapshotStorage::Writer,
+    ) -> Result<LogId, StateMachineError<C>> {
+        let (callback, rx_result) = C::oneshot();
+        let _ = self.tx_task.send(Task::SnapshotSave {
+            snapshot_writer,
+            callback,
+        })?;
+        rx_result.await?
+    }
+
+    pub(crate) async fn on_snapshot_load(
+        &self,
+        snapshot_reader: C::SnapshotStorage::Reader,
+    ) -> Result<LogId, StateMachineError<C>> {
+        let (callback, rx_result) = C::oneshot();
+        let _ = self.tx_task.send(Task::SnapshotLoad {
+            snapshot_reader,
+            callback,
+        })?;
+        rx_result.await?
+    }
+
+    pub(crate) fn get_committed_log_index(&self) -> usize {
+        self.committed_log_index.load(Ordering::Relaxed)
     }
 
     fn notification_send_commit_result(
@@ -96,46 +124,26 @@ where
             .map_err(|_| Fatal::Shutdown)
     }
 
-    async fn commit_entries(&self, entries: Vec<Entry<C>>) -> Result<(), Fatal<C>> {
+    /// 提交一批，并设置提交点： committed_log_id
+    async fn commit_entries(&mut self, entries: &Vec<Entry<C>>, commit_point: LogId) -> Result<(), Fatal<C>> {
         if !entries.is_empty() {
             let start_log_index = entries.first().unwrap().log_id.index;
+            assert_eq!(start_log_index, self.committed_log_index.load(Ordering::Relaxed) + 1);
+            let entries = entries.into_iter();
             let commit_result = self.fsm.on_commit(entries).await;
             self.notification_send_commit_result(start_log_index, commit_result)?
         }
+        self.set_committed_log_id(commit_point);
         Ok(())
     }
 
-    pub(crate) async fn on_snapshot_save(
-        &self,
-        snapshot_writer: &mut C::SnapshotStorage::Writer,
-    ) -> Result<LogId, StateMachineError<C>> {
-        let tx_task = self.check_shutdown_for_task()?;
-        let (callback, rx_result) = C::oneshot();
-        let _ = tx_task
-            .send(Task::SnapshotSave {
-                snapshot_writer,
-                callback,
-            })
-            .map_err(|e| StateMachineError::Send { e })?;
-        rx_result.await?
+    fn set_committed_log_id(&mut self, committed_log_id: LogId) {
+        // set committed log info
+        self.committed_log_index.store(committed_log_id.index, Ordering::Relaxed);
+        self.committed_log_id = committed_log_id;
     }
 
-    pub(crate) async fn on_snapshot_load(
-        &self,
-        snapshot_reader: &C::SnapshotStorage::Reader,
-    ) -> Result<(), StateMachineError<C>> {
-        let tx_task = self.check_shutdown_for_task()?;
-        let (callback, rx_result) = C::oneshot();
-        let _ = tx_task
-            .send(Task::SnapshotLoad {
-                snapshot_reader,
-                callback,
-            })
-            .map_err(|e| StateMachineError::Send { e })?;
-        rx_result.await?
-    }
-
-    async fn handle_task(&self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
             Task::CommitAt { log_index } => self.handle_commit_at(log_index).await?,
             Task::CommitBatch {
@@ -148,63 +156,83 @@ where
             Task::SnapshotLoad {
                 snapshot_reader,
                 callback,
-            } => self.handle_load_snapshot(snapshot_reader, callback).await?,
-
+            } => {
+                let result = self.handle_load_snapshot(snapshot_reader).await;
+                send_result(callback, result)?;
+            }
             Task::SnapshotSave {
                 snapshot_writer,
                 callback,
-            } => self.handle_task_save_snapshot().await,
+            } => {
+                let result = self.handle_save_snapshot(snapshot_writer).await;
+                send_result(callback, result)?;
+            },
+            Task::ReportError {
+                fatal
+            } => {
+                self.handle_report_error(fatal).await;
+            }
         }
 
         Ok(())
     }
 
+    async fn handle_report_error(&mut self, fatal: PacificaError<C>) {
+        if self.fatal.is_some() {
+            // error
+            return;
+        }
+        self.fsm.on_error(&fatal).await;
+        self.fatal.replace(fatal);
+    }
+
     async fn handle_commit_batch(
-        &self,
+        &mut self,
         primary_term: usize,
         start_log_index: usize,
         requests: Vec<Option<C::Request>>,
     ) -> Result<(), Fatal<C>> {
         // case 1: no decode request bytes. eg: From Primary.
-        let last_commit_at = self.last_commit_at.load(Ordering::Relaxed);
-        assert_eq!(start_log_index, last_commit_at + 1);
+        let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
+        assert_eq!(start_log_index, committed_log_index + 1);
         let max_commit_num = 20;
         let mut entries_buffer = Vec::with_capacity(10);
-        let mut committing_log_index = start_log_index;
+        let mut committing_log_index = start_log_index - 1;
         for request in requests.into_iter() {
+            committing_log_index += 1;
             if let Some(user_request) = request {
                 entries_buffer.push(Entry {
                     log_id: LogId::new(primary_term, committing_log_index),
                     request: user_request,
                 })
             }
-            committing_log_index += 1;
             if entries_buffer.len() >= max_commit_num {
-                self.commit_entries(entries_buffer).await?;
+                self.commit_entries(&entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
+                entries_buffer.clear();
             }
         }
-        self.commit_entries(entries_buffer).await?;
+        self.commit_entries(&entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
         Ok(())
     }
-    async fn handle_commit_at(&self, log_index: usize) -> Result<(), Fatal<C>> {
+    async fn handle_commit_at(&mut self, log_index: usize) -> Result<(), Fatal<C>> {
         // case 2: need to decode request.
-        let last_commit_at = self.last_commit_at.load(Ordering::Relaxed);
-        if log_index <= last_commit_at {
+        let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
+        if log_index <= committed_log_index {
             // warn log
             return Ok(());
         };
         let max_commit_num = 20;
         let mut entries_buffer = Vec::with_capacity(10);
-        let mut committing_log_index = last_commit_at + 1;
-        while committing_log_index <= log_index {
-            let log_entry = self.log_manager.get_log_entry_at(committing_log_index);
+        let mut committing_log_index = committed_log_index;
+        while committing_log_index < log_index {
+            committing_log_index += 1;
+            let log_entry = self.log_manager.get_log_entry_at(committing_log_index).await;
             match log_entry {
                 Ok(log_entry) => {
-                    let log_id = log_entry.log_id;
+                    let log_id = log_entry.log_id.clone();
                     match log_entry.payload {
                         LogEntryPayload::Normal { op_data } => {
                             let decode_request = C::RequestCodec::decode(op_data);
-
                             match decode_request {
                                 Ok(request) => entries_buffer.push(Entry { log_id, request }),
                                 Err(e) => {
@@ -212,7 +240,12 @@ where
                                 }
                             }
                         }
-                        LogEntryPayload::Empty => {}
+                        LogEntryPayload::Empty => {
+                            //
+                        }
+                    }
+                    if entries_buffer.len() >= max_commit_num {
+                        self.commit_entries(&entries_buffer, log_entry.log_id.clone())?;
                     }
                 }
                 Err(err) => {
@@ -220,51 +253,54 @@ where
                     break;
                 }
             }
-            if entries_buffer.len() >= max_commit_num {
-                let _ = self.fsm.on_commit(&entries_buffer).await;
-            }
+
         }
 
         if !entries_buffer.is_empty() {
             let _ = self.fsm.on_commit(&entries_buffer).await;
         }
-        self.last_commit_at.store(committing_log_index, Ordering::Relaxed);
+
         Ok(())
     }
 
-    pub(crate) async fn handle_load_snapshot(
-        &self,
-        snapshot_reader: &C::SnapshotStorage::Reader,
-        callback: ResultSender<C, (), StateMachineError<C>>,
-    ) -> Result<(), Fatal<C>> {
-        let result = self.fsm.on_load_snapshot(snapshot_reader).await;
-        let result = result.map_err(|e| StateMachineError::UserError);
-        let result = callback.send(result).map_err(|e| StateMachineError::UserError);
-        result
+    async fn handle_load_snapshot(
+        &mut self,
+        snapshot_reader: C::SnapshotStorage::Reader,
+    ) -> Result<LogId, StateMachineError<C>> {
+        let meta = snapshot_reader.get_snapshot_meta().await;
+        let snapshot_log_id = meta.get_snapshot_log_id();
+        let committed_log_id = self.committed_log_id.clone();
+        if committed_log_id > snapshot_log_id {
+            // error
+            return Err(StateMachineError::IllegalSnapshot {
+                committed_log_id,
+                snapshot_log_id,
+            });
+        }
+        let _ = self
+            .fsm
+            .on_load_snapshot(&snapshot_reader)
+            .await
+            .map_err(|e| StateMachineError::SnapshotLoad { source: e })?;
+
+        self.committed_log_id = snapshot_log_id.clone();
+        self.committed_log_index.store(snapshot_log_id.index, Ordering::Relaxed);
+        Ok(snapshot_log_id)
     }
 
-    pub(crate) async fn handle_save_snapshot(
+    async fn handle_save_snapshot(
         &self,
-        snapshot_writer: &C::SnapshotStorage::Writer,
-        callback: ResultSender<C, (), StateMachineError<C>>,
-    ) -> Result<(), StateMachineError<C>> {
+        mut snapshot_writer: C::SnapshotStorage::Writer
+    ) -> Result<LogId, StateMachineError<C>> {
+        let snapshot_log_id = self.committed_log_id.clone();
+        snapshot_writer.write_snapshot_log_id(snapshot_log_id.clone());
         let result = self.fsm.on_save_snapshot(snapshot_writer).await;
-        let result = result.map_err(|e| StateMachineError::UserError);
-        let result = callback.send(result).map_err(|e| StateMachineError::UserError);
-        result
-    }
-
-    fn check_shutdown_for_task(&self) -> Result<&MpscUnboundedSenderOf<C, Task<C>>, StateMachineError<C>> {
-        self.tx_task.as_ref().ok_or_else(|| Fatal::Shutdown {
-        })
-    }
-
-    pub(crate) fn get_committed_log_index(&self) -> usize {
-        self.committed_index.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn get_last_commit_at(&self) -> usize {
-        self.last_commit_at.load(Ordering::Relaxed)
+        let _ = result.map_err(|e| {
+            StateMachineError::SnapshotSave {
+                source: e
+            }
+        })?;
+        Ok(snapshot_log_id)
     }
 }
 
@@ -278,6 +314,7 @@ where
     }
 
     async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+        self.fsm.on_shutdown().await;
         Ok(true)
     }
 }

@@ -1,19 +1,22 @@
 use std::fmt::{Display, Formatter};
+use crate::TypeConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
-pub struct ReplicaId {
+pub struct ReplicaId<C>
+where C: TypeConfig {
     pub group_name: String,
-    pub node_id: String,
+    pub node_id: C::NodeId,
 }
 
-impl Display for ReplicaId {
+impl<C> Display for ReplicaId<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}-{}", self.group_name, self.node_id)
     }
 }
 
-impl ReplicaId {
-    pub fn new(group_name: String, node_id: String) -> ReplicaId {
+impl<C> ReplicaId<C>
+where C: TypeConfig {
+    pub fn new(group_name: String, node_id: C::NodeId) -> Self {
         ReplicaId { group_name, node_id }
     }
 }

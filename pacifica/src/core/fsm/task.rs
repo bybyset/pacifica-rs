@@ -1,6 +1,7 @@
 use crate::{LogId, TypeConfig};
 use crate::core::fsm::StateMachineError;
 use crate::core::ResultSender;
+use crate::error::{Fatal, PacificaError};
 
 pub(crate) enum Task<C>
 where
@@ -25,4 +26,8 @@ where
         snapshot_writer: C::SnapshotStorage::Writer,
         callback: ResultSender<C, (), StateMachineError<C>>,
     },
+
+    ReportError {
+        fatal: PacificaError<C>,
+    }
 }

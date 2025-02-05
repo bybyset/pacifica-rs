@@ -1,11 +1,26 @@
+use crate::pacifica::{Codec, Response};
 use crate::runtime::AsyncRuntime;
 use crate::{LogStorage, MetaClient, Request, SnapshotStorage};
-use crate::pacifica::{Codec, Response};
+use std::fmt::{Debug, Display};
+use std::hash::Hash;
 
-pub trait NodeId {}
+pub trait NodeIdEssential:
+    Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+{
+}
+
+impl<T> NodeIdEssential for T where
+    T: Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+{
+}
+
+pub trait NodeId: NodeIdEssential {}
+
+impl<T> NodeId for T where T: NodeIdEssential {}
+
+
 
 pub trait TypeConfig {
-
     type Request: Request;
     type Response: Response;
     type RequestCodec: Codec<Self::Request>;
@@ -17,8 +32,6 @@ pub trait TypeConfig {
     type MetaClient: MetaClient;
     type LogStorage: LogStorage;
     type SnapshotStorage: SnapshotStorage;
-
-
 }
 
 pub mod alias {

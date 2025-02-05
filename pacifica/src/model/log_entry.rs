@@ -95,7 +95,7 @@ impl Checksum for LogEntry {
 
     fn is_corrupted(&self) -> bool {
         if let Some(checksum) = self.check_sum {
-            return checksum == self.checksum();
+            return checksum != self.checksum();
         };
         false
     }

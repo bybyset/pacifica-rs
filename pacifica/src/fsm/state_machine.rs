@@ -1,8 +1,8 @@
 use crate::fsm::entry::Entry;
 use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::TypeConfig;
-use std::io::Error;
 use anyerror::AnyError;
+use crate::error::{Fatal, PacificaError};
 
 pub trait StateMachine<C>
 where
@@ -13,9 +13,8 @@ where
 
     async fn on_commit<I>(&self, entries: I) -> Vec<Result<C::Response, AnyError>>
     where
-        I: IntoIterator<Item = Entry<C>>,
+        I: Iterator<Item = Entry<C>>,
     {
-        let entries = entries.into_iter();
         let mut results = Vec::with_capacity(entries.size_hint().0);
         for entry in entries {
             let result = self.on_commit_entry(entry).await;
@@ -28,11 +27,11 @@ where
         Err(AnyError::error("Not implemented"))
     }
 
-    async fn on_load_snapshot(&self, snapshot_reader: &Self::Reader) -> Result<(), Error>;
+    async fn on_load_snapshot(&self, snapshot_reader: &mut Self::Reader) -> Result<(), AnyError>;
 
-    async fn on_save_snapshot(&self, snapshot_writer: &Self::Writer) -> Result<(), Error>;
+    async fn on_save_snapshot(&self, snapshot_writer: &mut Self::Writer) -> Result<(), AnyError>;
 
-    async fn on_shutdown(&self) -> Result<(), Error>;
+    async fn on_shutdown(&self);
 
-    async fn on_error(&self) -> Result<(), Error>;
+    async fn on_error(&self, fatal: &PacificaError<C>);
 }
