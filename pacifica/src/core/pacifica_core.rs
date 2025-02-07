@@ -1,32 +1,33 @@
-use std::cell::RefCell;
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
+use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replica_msg::{ApiMsg, RpcMsg};
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::CoreState;
 use crate::error::{Fatal, PacificaError};
-use crate::rpc::message::AppendEntriesRequest;
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::rpc::ReplicaService;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
-use crate::util::RepeatedTimer;
+use crate::util::{send_result, RepeatedTimer};
 use crate::{LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine, TypeConfig};
+use std::cell::RefCell;
+use std::ops::Deref;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-pub struct ReplicaCore<C, RC, FSM, LS>
+pub struct ReplicaCore<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
-    LS: LogStorage,
 {
     replica_id: ReplicaId<C>,
     rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
@@ -39,33 +40,30 @@ where
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
 
-    replica_client: Arc<RC>,
+    replica_client: Arc<C::ReplicaClient>,
     meta_client: Arc<C::MetaClient>,
 
 
     replica_option: Arc<ReplicaOption>,
 
-    replicator_group: Option<ReplicatorGroup<C, RC, FSM>>,
+    replicator_group: Option<ReplicatorGroup<C, C::ReplicaClient, FSM>>,
 
-    core_state: RefCell<CoreState<C, RC, FSM>>,
+    core_state: RwLock<RefCell<CoreState<C, FSM>>>,
 }
 
-impl<C, RC, FSM, LS, SS> ReplicaCore<C, RC, FSM, LS>
+impl<C, FSM> ReplicaCore<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
-    LS: LogStorage,
-    SS: SnapshotStorage,
 {
     pub(crate) fn new(
         replica_id: ReplicaId<C>,
-        rx_inner: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
+        rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
         fsm: FSM,
-        log_storage: LS,
-        snapshot_storage: SS,
+        log_storage: C::LogStorage,
+        snapshot_storage: C::SnapshotStorage,
         meta_client: C::MetaClient,
-        replica_client: RC,
+        replica_client: C::ReplicaClient,
         replica_option: ReplicaOption,
     ) -> Self {
         let replica_option = Arc::new(replica_option);
@@ -94,7 +92,7 @@ where
 
         ReplicaCore {
             replica_id,
-            rx_api: rx_inner,
+            rx_api,
             tx_notification,
             rx_notification,
             fsm_caller,
@@ -107,7 +105,7 @@ where
             replica_option,
 
             replicator_group: None,
-            core_state: RefCell::new(CoreState::Shutdown),
+            core_state: RwLock::new(RefCell::new(CoreState::Shutdown)),
         }
     }
 
@@ -115,15 +113,27 @@ where
         self.replica_group.get_state(self.replica_id.clone());
     }
 
-    pub(crate) async fn handle_api_msg(&self, msg: ApiMsg<C>) {
+    async fn handle_api_msg(&mut self, msg: ApiMsg<C>) {
         match msg {
             ApiMsg::CommitOperation { operation } => {
                 self.handle_commit(operation);
             }
             ApiMsg::Recovery {} => {}
 
-            ApiMsg::SaveSnapshot {} => {}
-            ApiMsg::StateChange {} => {}
+            ApiMsg::SaveSnapshot {
+                callback
+            } => {
+                let result = self.snapshot_executor.snapshot().await;
+                let _ = send_result(callback, result);
+            },
+            ApiMsg::TransferPrimary {
+                new_primary
+            } => {
+                self.handle_transfer_primary(new_primary);
+            }
+            ApiMsg::StateChange {} => {
+
+            }
         }
     }
 
@@ -147,20 +157,28 @@ where
         Ok(())
     }
 
+
     fn handle_commit(&self, operation: Operation<C>) {
         self.core_state.handle_commit_operation(operation);
     }
+
+    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {
+
+
+    }
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest) {
-        self.core_state.
+
+        self.core_state.borrow().handle_append_entries_request(request);
 
     }
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
-        let old_replica_state = self.core_state.get_replica_state();
+        let core_state = self.core_state.write().unwrap();
+        let old_replica_state = core_state.get_replica_state();
         let new_replica_state = self.replica_group.get_state(&self.replica_id).await;
-        if old_replica_state == new_replica_state {
+        if old_replica_state != new_replica_state {
             // state change
-            let core_state = match new_replica_state {
+            let new_core_state = match new_replica_state {
                 ReplicaState::Primary => {
                     CoreState::new_primary(
                         self.fsm_caller.clone(),
@@ -184,7 +202,7 @@ where
                     CoreState::Shutdown
                 }
             };
-            let old_core_state = self.core_state.replace(new_replica_state);
+            core_state.replace(new_core_state);
         }
     }
 
@@ -202,7 +220,7 @@ where
     }
 }
 
-impl<C, RC, FSM, LS> Lifecycle<C> for ReplicaCore<C, RC, FSM, LS>
+impl<C, FSM> Lifecycle<C> for ReplicaCore<C, FSM>
 where
     C: TypeConfig,
 {
@@ -232,7 +250,7 @@ where
     }
 }
 
-impl<C, RC, FSM, LS> Component<C> for ReplicaCore<C, RC, FSM, LS>
+impl<C, FSM> Component<C> for ReplicaCore<C, FSM>
 where
     C: TypeConfig,
 {
@@ -269,5 +287,38 @@ where
 
             }
         }
+    }
+}
+
+impl<C, FSM> ReplicaService for ReplicaCore<C, FSM>
+where C: TypeConfig,
+    FSM: StateMachine<C>
+{
+
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()> {
+
+        let core_state = self.core_state.read().unwrap();
+        let core_state = core_state.borrow();
+        core_state.handle_append_entries_request(request).await;
+
+
+        Ok(AppendEntriesResponse {})
+
+    }
+
+    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest) -> Result<InstallSnapshotResponse, ()> {
+        todo!()
+    }
+
+    async fn handle_transfer_primary_request(&self, request: TransferPrimaryRequest) -> Result<TransferPrimaryResponse, ()> {
+        todo!()
+    }
+
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, ()> {
+        todo!()
+    }
+
+    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest) -> Result<ReplicaRecoverResponse, ()> {
+        todo!()
     }
 }

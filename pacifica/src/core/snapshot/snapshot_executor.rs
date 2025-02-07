@@ -73,21 +73,20 @@ where
                 let _ = send_result(callback, result);
             }
             Task::SnapshotSave { callback } => {
-                let result = self.do_snapshot_save().await;
+                let result = self.do_snapshot_save(0).await;
                 let _ = send_result(callback, result);
             }
             Task::SnapshotTick => {
-                let _ = self.do_snapshot_save().await;
+                let _ = self.do_snapshot_save(self.replica_option.snapshot_log_index_margin).await;
             }
         }
         Ok(())
     }
 
-    async fn do_snapshot_save(&mut self) -> Result<LogId, SnapshotError<C>> {
-        let snapshot_log_index_margin = self.replica_option.snapshot_log_index_margin;
+    async fn do_snapshot_save(&mut self, log_index_margin: usize) -> Result<LogId, SnapshotError<C>> {
         let committed_log_index = self.fsm_caller.get_committed_log_index();
         let distance = committed_log_index - self.last_snapshot_log_id.index;
-        if distance <= snapshot_log_index_margin {
+        if distance <= log_index_margin {
             return Ok(self.last_snapshot_log_id.clone());
         }
         let writer = self.snapshot_storage.open_writer().await.map_err(|e| StorageError::open_writer(e))?;

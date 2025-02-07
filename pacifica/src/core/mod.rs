@@ -22,3 +22,8 @@ pub(crate) use self::command::Command;
 
 pub(crate) use self::state::CoreState;
 
+pub(crate) use self::lifecycle::ReplicaComponent;
+pub(crate) use self::lifecycle::Lifecycle;
+
+pub(crate) use self::task_sender::TaskSender;
+

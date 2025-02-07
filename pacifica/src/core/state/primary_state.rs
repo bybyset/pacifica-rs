@@ -19,25 +19,23 @@ use crate::core::operation::Operation;
 use crate::core::task_sender::TaskSender;
 use crate::rpc::message::ReplicaRecoverRequest;
 
-pub(crate) struct PrimaryState<C, RC, FSM>
+pub(crate) struct PrimaryState<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
 {
     ballot_box: ReplicaComponent<C, BallotBox<C, FSM>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
-    replicator_group: ReplicatorGroup<C, RC, FSM>,
+    replicator_group: ReplicatorGroup<C, C::ReplicaClient, FSM>,
     lease_period_timer: RepeatedTimer<C, Task<C>>,
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
-impl<C, RC, FSM> PrimaryState<C, RC, FSM>
+impl<C, FSM> PrimaryState<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
 {
     pub(crate) fn new(
@@ -45,7 +43,7 @@ where
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-        replica_client: Arc<RC>,
+        replica_client: Arc<C::ReplicaClient>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C> {
         let ballot_box = ReplicaComponent::new(BallotBox::new(next_log_index, fsm_caller));
@@ -160,11 +158,10 @@ where
     }
 }
 
-impl<C, RC, FSM> Lifecycle<C> for PrimaryState<C, RC, FSM>
+impl<C, FSM> Lifecycle<C> for PrimaryState<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
-    RC: ReplicaClient<C>,
 {
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
         // startup ballot box
@@ -181,10 +178,9 @@ where
     }
 }
 
-impl<C, RC, FSM> Component<C> for PrimaryState<C, RC, FSM>
+impl<C, FSM> Component<C> for PrimaryState<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
     FSM: StateMachine<C>,
 {
     async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {

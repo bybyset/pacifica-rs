@@ -1,7 +1,7 @@
 use crate::core::fsm::StateMachineError;
 use crate::core::ResultSender;
 use crate::core::snapshot::SnapshotError;
-use crate::TypeConfig;
+use crate::{LogId, TypeConfig};
 
 pub(crate) enum Task<C>
 where
@@ -9,11 +9,11 @@ where
 {
 
     SnapshotLoad {
-        callback: ResultSender<C, (), SnapshotError>,
+        callback: ResultSender<C, (), SnapshotError<C>>,
     },
 
     SnapshotSave {
-        callback: ResultSender<C, (), SnapshotError>,
+        callback: ResultSender<C, LogId, SnapshotError<C>>,
     },
 
     SnapshotTick

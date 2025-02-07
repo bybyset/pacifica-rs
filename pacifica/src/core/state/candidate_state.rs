@@ -13,18 +13,17 @@ use crate::util::{RepeatedTimer, TickFactory};
 use crate::{ReplicaClient, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::Arc;
 
-pub(crate) struct CandidateState<C, FSM, RC>
+pub(crate) struct CandidateState<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
-    RC: ReplicaClient<C>,
 {
     recover_timer: RepeatedTimer<C, Task<C>>,
 
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-    replica_client: Arc<RC>,
+    replica_client: Arc<C::ReplicaClient>,
     append_entries_handler: AppendEntriesHandler<C, FSM>,
     tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
 
@@ -32,17 +31,16 @@ where
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
-impl<C, FSM, RC> CandidateState<C, FSM, RC>
+impl<C, FSM> CandidateState<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
-    RC: ReplicaClient<C>,
 {
     pub fn new(
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-        replica_client: Arc<RC>,
+        replica_client: Arc<C::ReplicaClient>,
         tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
         replica_option: Arc<ReplicaOption>,
 
@@ -94,8 +92,8 @@ where
     }
 
 
-    async fn handle_append_entries_request(
-        &mut self,
+    pub(crate) async fn handle_append_entries_request(
+        &self,
         request: AppendEntriesRequest,
     ) -> Result<AppendEntriesResponse, Fatal<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await

@@ -1,9 +1,3 @@
-#![feature(unboxed_closures)]
-#![feature(unboxed_closures)]
-#![feature(unboxed_closures)]
-#![feature(unboxed_closures)]
-#![feature(unboxed_closures)]
-
 mod options;
 mod config_cluster;
 mod error;
@@ -35,7 +29,6 @@ pub use crate::fsm::StateMachine;
 pub use crate::storage::LogStorage;
 pub use crate::storage::LogReader;
 pub use crate::storage::LogWriter;
-pub use crate::storage::LogEntryCodec;
 pub use crate::storage::SnapshotStorage;
 pub use crate::storage::StorageError;
 

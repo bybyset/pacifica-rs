@@ -1,4 +1,3 @@
-use std::f32::consts::E;
 use crate::core::fsm::StateMachineError;
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::notification_msg::NotificationMsg;
@@ -88,8 +87,8 @@ where
     }
 
 
-    async fn get_replica_group_and_wait(&self) -> &ReplicaGroup<C> {
-        if let Some(replica_group) = self.replica_group.as_ref() {
+    async fn get_replica_group_and_wait(&self) -> ReplicaGroup<C> {
+        if let Some(replica_group) = self.replica_group() {
             return replica_group;
         };
 

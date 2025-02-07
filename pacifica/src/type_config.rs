@@ -1,6 +1,6 @@
 use crate::pacifica::{Codec, Response};
 use crate::runtime::AsyncRuntime;
-use crate::{LogStorage, MetaClient, Request, SnapshotStorage};
+use crate::{LogStorage, MetaClient, ReplicaClient, Request, SnapshotStorage};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
 
@@ -29,6 +29,7 @@ pub trait TypeConfig {
 
     type NodeId: NodeId;
 
+    type ReplicaClient: ReplicaClient;
     type MetaClient: MetaClient;
     type LogStorage: LogStorage;
     type SnapshotStorage: SnapshotStorage;

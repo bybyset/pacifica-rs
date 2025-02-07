@@ -12,22 +12,22 @@ pub(crate) struct ReplicatorGroup<C, RC, FSM>
 where
     C: TypeConfig,
     RC: ReplicaClient<C>,
-    FSM: StateMachine,
+    FSM: StateMachine<C>,
 {
-    primary_id: ReplicaId,
+    primary_id: ReplicaId<C>,
 
     log_manager: Arc<LogManager<C>>,
     snapshot_executor: Arc<SnapshotExecutor<C, FSM>>,
     replica_client: Arc<RC>,
 
-    replicators: RwLock<HashMap<ReplicaId, Rc<Replicator<C, RC, FSM>>>>,
+    replicators: RwLock<HashMap<ReplicaId<C>, Rc<Replicator<C, RC, FSM>>>>,
 }
 
 impl<C, RC, FSM> ReplicatorGroup<C, RC, FSM>
 where
     C: TypeConfig,
     RC: ReplicaClient<C>,
-    FSM: StateMachine,
+    FSM: StateMachine<C>,
 {
     pub(crate) fn new(replica_client: Arc<RC>) -> Self {
         todo!()
@@ -35,7 +35,7 @@ where
 
     pub(crate) fn add_replicator(
         &mut self,
-        target_id: ReplicaId,
+        target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
     ) -> Result<(), Fatal<C>> {
 

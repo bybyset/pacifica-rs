@@ -93,8 +93,8 @@ where
         Ok(())
     }
 
-    async fn handle_append_entries_request(
-        &mut self,
+    pub(crate) async fn handle_append_entries_request(
+        &self,
         request: AppendEntriesRequest,
     ) -> Result<AppendEntriesResponse, Fatal<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await

@@ -4,6 +4,7 @@ mod utils;
 mod byte_size;
 mod checksum;
 mod leased;
+mod task_sender;
 
 pub use self::instant::Instant;
 pub use self::instant::TokioInstant;

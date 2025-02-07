@@ -1,8 +1,4 @@
-use crate::pacifica::{AppendEntriesRequest, AppendEntriesResponse};
-use crate::rpc::message::{
-    DemisePrimaryRequest, DemisePrimaryResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
-    InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse,
-};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, DemisePrimaryRequest, DemisePrimaryResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::rpc::RpcError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
@@ -13,7 +9,7 @@ where
 {
     async fn append_entries(
         &self,
-        target: ReplicaId,
+        target: ReplicaId<C>,
         request: AppendEntriesRequest,
         rpc_option: RpcOption,
     ) -> Result<AppendEntriesResponse, RpcError>;

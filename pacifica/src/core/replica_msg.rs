@@ -1,6 +1,8 @@
-use crate::model::Operation;
+use crate::core::operation::Operation;
 use crate::rpc::message::{AppendEntriesRequest, GetFileRequest, InstallSnapshotRequest, ReplicaRecoverRequest, TransferPrimaryRequest};
-use crate::TypeConfig;
+use crate::{LogId, ReplicaId, TypeConfig};
+use crate::core::ResultSender;
+use crate::core::snapshot::SnapshotError;
 
 pub(crate) enum ApiMsg<C>
 where
@@ -11,7 +13,11 @@ where
     },
 
     SaveSnapshot {
+        callback: ResultSender<C, LogId, SnapshotError<C>>,
+    },
 
+    TransferPrimary {
+        new_primary: ReplicaId<C>
     },
 
     Recovery {

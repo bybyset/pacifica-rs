@@ -1,6 +1,5 @@
 mod replica;
 mod declare_pacifica_types;
-mod replica_inner;
 mod codec;
 
 pub use self::replica::Replica;
