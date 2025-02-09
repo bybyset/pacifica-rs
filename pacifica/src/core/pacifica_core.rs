@@ -46,7 +46,7 @@ where
 
     replica_option: Arc<ReplicaOption>,
 
-    replicator_group: Option<ReplicatorGroup<C, C::ReplicaClient, FSM>>,
+    replicator_group: Option<ReplicatorGroup<C, FSM>>,
 
     core_state: RwLock<RefCell<CoreState<C, FSM>>>,
 }
@@ -319,6 +319,9 @@ where C: TypeConfig,
     }
 
     async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest) -> Result<ReplicaRecoverResponse, ()> {
-        todo!()
+        let core_state = self.core_state.read().unwrap();
+        let core_state = core_state.borrow();
+        core_state.handle_append_entries_request(request).await;
+
     }
 }

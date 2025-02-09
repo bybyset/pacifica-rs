@@ -4,7 +4,7 @@ use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::{operation, replicator};
-use crate::core::replicator::ReplicatorGroup;
+use crate::core::replicator::{ReplicatorGroup, ReplicatorType};
 use crate::error::{Fatal, PacificaError};
 use crate::model::{LogEntryPayload};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
@@ -27,7 +27,7 @@ where
     ballot_box: ReplicaComponent<C, BallotBox<C, FSM>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
-    replicator_group: ReplicatorGroup<C, C::ReplicaClient, FSM>,
+    replicator_group: ReplicatorGroup<C, FSM>,
     lease_period_timer: RepeatedTimer<C, Task<C>>,
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
@@ -90,7 +90,7 @@ where
             Task::ReplicaRecover {
                 request
             } => {
-
+                self.handle_replica_recover_task();
             }
         }
 
@@ -130,6 +130,20 @@ where
     async fn handle_lease_period(&mut self) {
         self.replica_group_agent.
 
+    }
+
+    pub(crate) async fn replica_recover(&self, request: ReplicaRecoverRequest<C>) {
+        // 必要检查
+        let cur_version = self.replica_group_agent.get_version().await;
+        if request.version != cur_version {
+            //ERROR
+        }
+        // 添加 Replicator
+        self.replicator_group.add_replicator(request.recover_id, ReplicatorType::Candidate);
+
+        // 等待 caught up
+
+        self.replicator_group.wait_caught_up();
     }
 
 }

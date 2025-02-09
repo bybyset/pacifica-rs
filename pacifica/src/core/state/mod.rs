@@ -10,7 +10,7 @@ use crate::error::Fatal;
 use crate::{ReplicaClient, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
 use crate::core::operation::Operation;
-use crate::rpc::message::AppendEntriesRequest;
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest};
 
 mod candidate_state;
 mod primary_state;
@@ -126,6 +126,18 @@ where
                 state
             } => {
                 state.handle_append_entries_request(request).await;
+            }
+            _ => {
+                tracing::warn!("");
+            }
+        }
+
+    }
+
+    pub(crate) async fn handle_replica_recover_request(&self, response: ReplicaRecoverRequest) {
+        match self {
+            CoreState::Primary { primary } => {
+                primary.
             }
             _ => {
                 tracing::warn!("");

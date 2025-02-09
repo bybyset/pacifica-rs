@@ -1,66 +1,63 @@
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::StateMachineCaller;
+use crate::core::lifecycle::Component;
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::options::ReplicatorOptions;
 use crate::core::replicator::replicator_type::ReplicatorType;
-use crate::core::replicator::task::Task;
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::error::Fatal;
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::rpc::RpcOption;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
-use crate::type_config::alias::{
-    JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotSenderOf,
-};
+use crate::type_config::alias::{JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::{LogEntry, LogId, ReplicaClient, ReplicaId, StateMachine, TypeConfig};
 use std::rc::Weak;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
 
-pub(crate) struct Replicator<C, RC, FSM>
+pub(crate) struct Replicator<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
-    FSM: StateMachine,
+    FSM: StateMachine<C>,
 {
-    primary_id: ReplicaId,
-    target_id: ReplicaId,
-    replica_client: Arc<RC>,
-    replica_group_agent: Arc<ReplicaGroupAgent<C>>,
-    log_manager: Arc<LogManager<C>>,
-    snapshot_executor: Arc<SnapshotExecutor<C, FSM>>,
-    fsm_caller: Arc<StateMachineCaller<C, FSM>>,
-    ballot_box: Arc<BallotBox<C>>,
+    primary_id: ReplicaId<C>,
+    target_id: ReplicaId<C>,
 
+    log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+    fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+    snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
+    replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+    ballot_box: Arc<BallotBox<C, FSM>>,
     options: Arc<ReplicatorOptions>,
+    replica_client: Arc<C::ReplicaClient>,
 
     // initial 1,
-    next_log_index: AtomicU64,
-
-    tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    loop_handler: Option<JoinHandleOf<C, Result<(), JoinErrorOf<C>>>>,
-    tx_task: Option<MpscUnboundedSenderOf<C, Task<C>>>,
+    next_log_index: AtomicUsize,
+    task_sender: TaskSender<C, Task<C>>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
-impl<C, RC, FSM> Replicator<C, RC, FSM>
+impl<C, FSM> Replicator<C, FSM>
 where
     C: TypeConfig,
-    RC: ReplicaClient<C>,
-    FSM: StateMachine,
+    FSM: StateMachine<C>,
 {
     pub(crate) fn new(
-        primary_id: ReplicaId,
-        target_id: ReplicaId,
-        replica_client: Arc<RC>,
-        log_manager: Arc<LogManager<C>>,
-        fsm_caller: Arc<StateMachineCaller<C, FSM>>,
-        snapshot_executor: Arc<SnapshotExecutor<C, FSM>>,
-        replica_group_agent: Arc<ReplicaGroupAgent<C>>,
-        ballot_box: Arc<BallotBox<C>>,
+        primary_id: ReplicaId<C>,
+        target_id: ReplicaId<C>,
+        log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+        fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+        snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
+        replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+        ballot_box: Arc<BallotBox<C, FSM>>,
         options: Arc<ReplicatorOptions>,
+        replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
+
+        let (tx_task, rx_task) = C::mpsc_unbounded();
         Replicator {
             primary_id,
             target_id,
@@ -72,79 +69,10 @@ where
             ballot_box,
             options,
 
-            next_log_index: AtomicU64::new(1), // initial is 1
-
-            tx_shutdown: Mutex::new(None),
-            loop_handler: None,
-            tx_task: None,
+            next_log_index: AtomicUsize::new(1), // initial is 1
+            task_sender: TaskSender::new(tx_task),
+            rx_task,
         }
-    }
-
-    pub(crate) async fn startup(&mut self) -> Result<(), Fatal<C>> {
-        let mut shutdown = self.tx_shutdown.lock().unwrap().take();
-        if let Some(_) = shutdown {
-            // repeated startup
-            return Ok(());
-        }
-        let (tx_task, rx_task) = C::mpsc_unbounded();
-        let (tx_shutdown, rx_shutdown) = C::oneshot();
-        let loop_handler = C::spawn(self.run_loop(rx_shutdown, rx_task));
-        self.loop_handler.replace(loop_handler);
-        self.tx_task.replace(tx_task);
-        shutdown.replace(tx_shutdown);
-
-        // init next_log_index
-        let next_log_index = self.log_manager.get_last_log_index() + 1;
-        self.next_log_index.store(next_log_index, Ordering::Relaxed);
-
-        // start heart beat timer
-
-        // send probe
-
-        Ok(())
-    }
-
-    pub(crate) async fn shutdown(&mut self) -> Result<(), JoinErrorOf<C>> {
-        let shutdown = self.tx_shutdown.lock().unwrap().take();
-        if let Some(tx_shutdown) = shutdown {
-            // send shutdown msg
-            let _ = tx_shutdown.send(());
-            // wait
-            if let Some(loop_handler) = self.loop_handler.take() {
-                let _ = loop_handler.await;
-            }
-            // tx_task
-            let _ = self.tx_task.take();
-        }
-        Ok(())
-    }
-
-    async fn run_loop(
-        &mut self,
-        mut rx_shutdown: OneshotSenderOf<C, ()>,
-        mut rx_task: MpscUnboundedReceiverOf<C, ()>,
-    ) -> Result<(), Fatal<C>> {
-        loop {
-            futures::select_biased! {
-                 _ = rx_shutdown.recv().fuse() => {
-                        tracing::info!("received shutdown signal.");
-                        break;
-                }
-
-                task_msg = rx_task.recv().fuse() => {
-                    match task_msg {
-                        Some(task) => {
-                            self.handle_task(task).await?
-                        }
-                        None => {
-                            tracing::warn!("received unexpected task message.");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
     }
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
@@ -177,7 +105,7 @@ where
         todo!()
     }
 
-    pub(crate) fn get_type(&self) -> Result<ReplicatorType, Fatal<C>> {
+    pub(crate) fn get_type(&self) -> ReplicatorType {
         todo!()
     }
 
@@ -246,7 +174,7 @@ where
     }
 
     /// prev LogId of LogId(1, 1) is LogId(0, 0)
-    fn fill_common_append_log_entries_request(&self, prev_log_index: u64) -> Option<AppendEntriesRequest> {
+    fn fill_common_append_log_entries_request(&self, prev_log_index: usize) -> Option<AppendEntriesRequest> {
         // prev_log_index must be >= 0, otherwise install snapshot
         if prev_log_index < 0 {
             return None;
@@ -270,4 +198,82 @@ where
             },
         }
     }
+}
+
+impl<C, FSM> Lifecycle<C> for Replicator<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+
+        // init next_log_index
+        let next_log_index = self.log_manager.get_last_log_index() + 1;
+        self.next_log_index.store(next_log_index, Ordering::Relaxed);
+
+
+        Ok(true)
+    }
+
+    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+        todo!()
+    }
+}
+
+impl<C, FSM> Component<C> for Replicator<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+        loop {
+            futures::select_biased! {
+                 _ = rx_shutdown.recv().fuse() => {
+                        tracing::info!("received shutdown signal.");
+                        break;
+                }
+
+                task_msg = self.rx_task.recv().fuse() => {
+                    match task_msg {
+                        Some(task) => {
+                            self.handle_task(task).await?
+                        }
+                        None => {
+                            tracing::warn!("received unexpected task message.");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+
+enum Task<C>
+where
+    C: TypeConfig, {
+
+
+    Heartbeat {
+
+    },
+
+    Probe {
+
+    },
+
+    AppendLogEntries {
+
+    },
+
+    InstallSnapshot {
+
+    },
+
+
+
+
+
 }
