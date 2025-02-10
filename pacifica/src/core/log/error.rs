@@ -6,7 +6,7 @@ pub(crate) enum LogManagerError<C>
 where C: TypeConfig {
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
-    NotFoundLogEntry {
+    NotFound {
         log_index: usize
     },
     // 损坏的日志，checksum不一致

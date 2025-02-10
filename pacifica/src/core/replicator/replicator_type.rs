@@ -1,4 +1,4 @@
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum ReplicatorType {
     Secondary,
 

@@ -253,12 +253,12 @@ where
     ///
     pub(crate) async fn get_log_entry_at(&self, log_index: usize) -> Result<LogEntry, LogManagerError<C>> {
         if log_index <= NOT_FOUND_INDEX {
-            return Err(LogManagerError::NotFoundLogEntry { log_index });
+            return Err(LogManagerError::NotFound { log_index });
         }
         if log_index < self.first_log_index.load(Ordering::Relaxed)
             || log_index > self.last_log_index.load(Ordering::Relaxed)
         {
-            return Err(LogManagerError::NotFoundLogEntry { log_index });
+            return Err(LogManagerError::NotFound { log_index });
         }
         let log_entry = self.get_log_entry_from_storage(log_index).await?;
 
@@ -274,7 +274,7 @@ where
                 };
                 Ok(log_entry)
             },
-            None => Err(LogManagerError::NotFoundLogEntry { log_index }),
+            None => Err(LogManagerError::NotFound { log_index }),
         };
         result
     }

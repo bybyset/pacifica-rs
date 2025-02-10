@@ -1,5 +1,8 @@
+use crate::core::ballot::BallotBox;
+use crate::core::fsm::StateMachineCaller;
 use crate::core::lifecycle::Component;
 use crate::core::log::LogManager;
+use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::Replicator;
 use crate::core::snapshot::{SnapshotError, SnapshotExecutor};
@@ -8,15 +11,11 @@ use crate::error::Fatal;
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
-use crate::{LogId, ReplicaClient, ReplicaId, StateMachine, TypeConfig};
+use crate::util::send_result;
+use crate::{LogId, ReplicaClient, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
-use crate::core::ballot::BallotBox;
-use crate::core::fsm::StateMachineCaller;
-use crate::core::replica_group_agent::ReplicaGroupAgent;
-use crate::core::replicator::options::ReplicatorOptions;
-use crate::util::send_result;
 
 pub(crate) struct ReplicatorGroup<C, FSM>
 where
@@ -29,9 +28,8 @@ where
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-    ballot_box: Arc<BallotBox<C, FSM>>,
-    options: Arc<ReplicatorOptions>,
-
+    ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+    options: Arc<ReplicaOption>,
 
     replicators: HashMap<ReplicaId<C>, ReplicaComponent<C, Replicator<C, FSM>>>,
     task_sender: TaskSender<C, Task<C, FSM>>,
@@ -49,8 +47,8 @@ where
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-        ballot_box: Arc<BallotBox<C, FSM>>,
-        options: Arc<ReplicatorOptions>,
+        ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+        options: Arc<ReplicaOption>,
         replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
@@ -99,13 +97,24 @@ where
         };
         if replicator.is_none() {
             // add replicator
-            self.do_add_replicator(target_id).await?;
+            self.do_add_replicator(target_id, replicator_type).await?;
         }
         Ok(())
     }
 
     pub(crate) fn is_alive(&self, replica_id: &ReplicaId<C>) -> bool {
-        todo!()
+        let replicator = self.replicators.get(replica_id);
+        let alive = {
+            match replicator {
+                Some(replicator) => {
+                    let last = replicator.last_rpc_response();
+                    let now = C::now();
+                    now - last < self.options.lease_period_timeout()
+                }
+                None => false,
+            }
+        };
+        alive
     }
 
     pub(crate) async fn wait_caught_up(&self, replica_id: ReplicaId<C>) -> Result<(), Fatal<C>> {
@@ -130,21 +139,27 @@ where
         result
     }
 
-    async fn do_add_replicator(&self, target_id: ReplicaId<C>) -> Result<(), Fatal<C>> {
+    async fn do_add_replicator(&self, target_id: ReplicaId<C>, replicator_type: ReplicatorType) -> Result<(), Fatal<C>> {
         let (callback, rx) = C::oneshot();
         let _ = self.task_sender.send(Task::AddReplicator {
             target_id,
+            replicator_type,
             callback,
         });
         let result = rx.await;
         result
     }
 
-    fn new_replicator(&self, target_id: ReplicaId<C>) -> ReplicaComponent<C, Replicator<C, FSM>> {
+    fn new_replicator(
+        &self,
+        target_id: ReplicaId<C>,
+        replicator_type: ReplicatorType,
+    ) -> ReplicaComponent<C, Replicator<C, FSM>> {
         let primary_id = self.primary_id.clone();
         let replicator = Replicator::new(
             primary_id,
             target_id,
+            replicator_type,
             self.log_manager.clone(),
             self.fsm_caller.clone(),
             self.snapshot_executor.clone(),
@@ -168,31 +183,36 @@ where
 
     async fn handle_task(&mut self, task: Task<C, FSM>) {
         match task {
-            Task::RemoveReplicator{
-                remove_id,
-                callback,
-            } => {
+            Task::RemoveReplicator { remove_id, callback } => {
                 let result = self.handle_remove_replicator(&remove_id);
                 let _ = send_result(callback, Ok(result));
             }
             Task::AddReplicator {
                 target_id,
-                callback
+                replicator_type,
+                callback,
             } => {
-                let result = self.handle_add_replicator(target_id).await;
+                let result = self.handle_add_replicator(target_id, replicator_type).await;
                 let _ = send_result(callback, result);
             }
         }
     }
 
-    fn handle_remove_replicator(&mut self, remove_id: &ReplicaId<C>) -> Option<ReplicaComponent<C, Replicator<C, FSM>>> {
+    fn handle_remove_replicator(
+        &mut self,
+        remove_id: &ReplicaId<C>,
+    ) -> Option<ReplicaComponent<C, Replicator<C, FSM>>> {
         let replicator = self.replicators.remove(remove_id);
         replicator
     }
 
-    async fn handle_add_replicator(&mut self, target_id: ReplicaId<C>) -> Result<(), Fatal<C>> {
+    async fn handle_add_replicator(
+        &mut self,
+        target_id: ReplicaId<C>,
+        replicator_type: ReplicatorType,
+    ) -> Result<(), Fatal<C>> {
         if !self.replicators.contains_key(&target_id) {
-            let mut replicator = self.new_replicator(target_id.clone());
+            let mut replicator = self.new_replicator(target_id.clone(), replicator_type);
             replicator.startup().await?;
             let old = self.replicators.insert(target_id, replicator);
             assert!(old.is_none());
@@ -251,11 +271,11 @@ where
 {
     AddReplicator {
         target_id: ReplicaId<C>,
+        replicator_type: ReplicatorType,
         callback: ResultSender<C, (), Fatal<C>>,
     },
     RemoveReplicator {
         remove_id: ReplicaId<C>,
         callback: ResultSender<C, Option<Replicator<C, FSM>>, Fatal<C>>,
     },
-
 }
