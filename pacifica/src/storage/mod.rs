@@ -14,6 +14,7 @@ pub use self::log_reader::LogReader;
 pub use self::snapshot_storage::SnapshotStorage;
 pub use self::snapshot_reader::SnapshotReader;
 pub use self::snapshot_writer::SnapshotWriter;
+pub use self::snapshot_meta::SnapshotMeta;
 
 
 pub use self::error::StorageError;

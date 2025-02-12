@@ -67,7 +67,7 @@ pub struct ReplicaOption {
     /// The maximum number of entries per payload allowed to be transmitted during replication
     ///
     #[clap(long, default_value = "100")]
-    pub max_payload_entries_num: u64,
+    pub max_payload_entries_num: u32,
 
     /// The maximum number of entries per payload allowed to be transmitted during replication
     /// Default 10m
@@ -77,6 +77,8 @@ pub struct ReplicaOption {
     ///
     #[clap(bool, default_value = "true")]
     pub log_entry_checksum_enable: bool,
+
+
 }
 
 impl Default for ReplicaOption {

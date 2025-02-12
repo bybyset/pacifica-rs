@@ -37,7 +37,8 @@ pub trait TypeConfig {
 
 pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
-    use crate::AsyncRuntime;
+    use crate::{AsyncRuntime, SnapshotStorage};
+    use crate::storage::SnapshotReader;
     use crate::TypeConfig;
 
     pub type AsyncRuntimeOf<C> = <C as TypeConfig>::AsyncRuntime;
@@ -67,4 +68,8 @@ pub mod alias {
     pub type WatchOf<C> = <RT<C> as AsyncRuntime>::Watch;
     pub type WatchSenderOf<C, T> = <WatchOf<C> as Watch>::Sender<T>;
     pub type WatchReceiverOf<C, T> = <WatchOf<C> as Watch>::Receiver<T>;
+
+    pub type SnapshotStorageOf<C> = <C as TypeConfig>::SnapshotStorage;
+    pub type SnapshotReaderOf<C> = <SnapshotStorageOf<C> as SnapshotStorage>::Reader;
+    pub type SnapshotWriteOf<C> = <SnapshotStorageOf<C> as SnapshotStorage>::Writer;
 }

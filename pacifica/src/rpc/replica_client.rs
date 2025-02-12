@@ -40,14 +40,14 @@ where
     async fn append_entries(
         &self,
         target: ReplicaId<C>,
-        request: AppendEntriesRequest,
+        request: AppendEntriesRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<AppendEntriesResponse, RpcError>;
 
     async fn install_snapshot(
-        &mut self,
-        primary_id: ReplicaId<C>,
-        request: InstallSnapshotRequest,
+        &self,
+        target_id: ReplicaId<C>,
+        request: InstallSnapshotRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<InstallSnapshotResponse, RpcError>;
 

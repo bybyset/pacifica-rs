@@ -9,8 +9,9 @@ use crate::core::Command;
 use crate::core::ResultSender;
 use crate::error::Fatal;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
-    JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
+    JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
 };
 use crate::util::{send_result, RepeatedTimer, TickFactory};
 use crate::{LogId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
@@ -19,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tracing_futures::Instrument;
-use crate::storage::SnapshotReader;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
 where
@@ -124,7 +124,6 @@ where
         Ok(())
     }
 
-
     pub(crate) async fn load_snapshot(&self) -> Result<LogId, SnapshotError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotLoad { callback })?;
@@ -145,6 +144,13 @@ where
 
     pub(crate) fn get_last_snapshot_log_id(&self) -> LogId {
         self.last_snapshot_log_id.clone()
+    }
+
+    pub(crate) async fn open_snapshot_reader(&self) -> Result<Option<SnapshotReaderOf<C>>, SnapshotError<C>> {
+        let snapshot_reader = self.snapshot_storage.open_reader().await.map_err(|e| {
+            StorageError::open_reader(e);
+        })?;
+        Ok(snapshot_reader)
     }
 }
 

@@ -1,8 +1,9 @@
-use crate::LogEntry;
+use crate::{LogEntry, TypeConfig};
 use crate::{LogId, ReplicaId};
 
-pub struct AppendEntriesRequest {
-    pub primary_id: ReplicaId,
+pub struct AppendEntriesRequest<C>
+where C:TypeConfig {
+    pub primary_id: ReplicaId<C>,
     pub term: usize,
     pub version: usize,
     pub prev_log_id: LogId,
@@ -11,8 +12,9 @@ pub struct AppendEntriesRequest {
     pub entries: Vec<LogEntry>,
 }
 
-impl AppendEntriesRequest {
-    pub fn new(primary_id: ReplicaId, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
+impl<C> AppendEntriesRequest<C>
+where C:TypeConfig {
+    pub fn new(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
         Self {
             primary_id,
             term,
