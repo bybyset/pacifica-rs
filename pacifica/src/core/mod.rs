@@ -8,17 +8,14 @@ mod log;
 mod snapshot;
 mod replicator;
 mod ballot;
-mod command;
 mod replica_group_agent;
 mod state;
 pub mod operation;
 mod lifecycle;
 mod task_sender;
+mod core_notification;
 
 pub(crate) type ResultSender<C, T, E> = OneshotSenderOf<C, Result<T, E>>;
-
-pub(crate) use self::command::Command;
-
 
 pub(crate) use self::state::CoreState;
 
@@ -26,4 +23,5 @@ pub(crate) use self::lifecycle::ReplicaComponent;
 pub(crate) use self::lifecycle::Lifecycle;
 
 pub(crate) use self::task_sender::TaskSender;
+pub(crate) use self::core_notification::CoreNotification;
 

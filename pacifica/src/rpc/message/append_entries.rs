@@ -31,7 +31,7 @@ where C:TypeConfig {
 }
 
 pub enum AppendEntriesResponse {
-    Success { term: usize, last_log_index: usize },
+    Success,
     HigherTerm { term: usize },
     ConflictLog { last_log_index: usize },
 }

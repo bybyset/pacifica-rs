@@ -55,7 +55,7 @@ where
     /// Initialize the ballot without providing a number (log index) for this vote
     pub(crate) async fn initiate_ballot(
         &self,
-        replica_group: ReplicaGroup,
+        replica_group: ReplicaGroup<C>,
         primary_term: usize,
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
@@ -74,7 +74,7 @@ where
     }
 
     /// cancel ballot
-    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId) -> Result<(), ()> {
+    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), ()> {
         todo!()
     }
 
@@ -83,7 +83,7 @@ where
     /// called by primary.
     pub(crate) fn ballot_by(
         &self,
-        replica_id: ReplicaId,
+        replica_id: ReplicaId<C>,
         start_log_index: usize,
         end_log_index: usize,
     ) -> Result<(), BallotError> {
@@ -124,7 +124,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn recover_ballot(&self, replica_id: ReplicaId, start_log_index: u64) -> Result<(), ()> {
+    pub(crate) fn recover_ballot(&self, replica_id: ReplicaId<C>, start_log_index: u64) -> Result<(), ()> {
         todo!()
     }
 

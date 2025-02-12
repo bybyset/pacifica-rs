@@ -4,7 +4,7 @@ use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;
-use crate::core::{Command, ResultSender};
+use crate::core::{CoreNotification, ResultSender};
 use crate::error::{Fatal, PacificaError};
 use crate::fsm::Entry;
 use crate::model::LogEntryPayload;
@@ -30,7 +30,7 @@ where
     committed_log_id: LogId,
     fsm: FSM,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
-    tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+    core_notification: Arc<CoreNotification<C>>,
 
     fatal: Option<PacificaError<C>>,
 
@@ -46,7 +46,7 @@ where
     pub(crate) fn new(
         fsm: FSM,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
-        tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+        core_notification: Arc<CoreNotification<C>>,
     ) -> Self {
         let committed_log_index = AtomicUsize::new(0);
         let (tx_task, rx_task) = C::mpsc_unbounded();
@@ -56,7 +56,7 @@ where
             fsm,
             log_manager,
             fatal: None,
-            tx_notification,
+            core_notification,
             tx_task,
             rx_task,
         };
@@ -119,9 +119,8 @@ where
             start_log_index,
             commit_result,
         };
-        self.tx_notification
-            .send(NotificationMsg::SendCommitResult { result: commit_result })
-            .map_err(|_| Fatal::Shutdown)
+        self.core_notification.send_commit_result(commit_result)?;
+        Ok(())
     }
 
     /// 提交一批，并设置提交点： committed_log_id
@@ -235,7 +234,7 @@ where
                             let decode_request = C::RequestCodec::decode(op_data);
                             match decode_request {
                                 Ok(request) => entries_buffer.push(Entry { log_id, request }),
-                                Err(e) => {
+                                Err(_) => {
                                     break;
                                 }
                             }

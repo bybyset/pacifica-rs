@@ -8,7 +8,7 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replica_msg::{ApiMsg, RpcMsg};
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
-use crate::core::CoreState;
+use crate::core::{CoreNotification, CoreState};
 use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::rpc::ReplicaService;
@@ -32,7 +32,7 @@ where
     replica_id: ReplicaId<C>,
     rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
 
-    tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+    core_notification: Arc<CoreNotification<C>>,
     rx_notification: MpscUnboundedReceiverOf<C, NotificationMsg<C>>,
 
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
@@ -69,11 +69,12 @@ where
         let replica_option = Arc::new(replica_option);
 
         let (tx_notification, rx_notification) = C::mpsc_unbounded();
+        let core_notification = Arc::new(CoreNotification::new(tx_notification));
         let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(log_storage, replica_option.clone())));
         let fsm_caller = Arc::new(ReplicaComponent::new(StateMachineCaller::new(
             fsm,
             log_manager.clone(),
-            tx_notification.clone(),
+            core_notification.clone(),
         )));
         let snapshot_executor = Arc::new(ReplicaComponent::new(SnapshotExecutor::new(
             snapshot_storage,
@@ -93,7 +94,7 @@ where
         ReplicaCore {
             replica_id,
             rx_api,
-            tx_notification,
+            core_notification,
             rx_notification,
             fsm_caller,
             log_manager,
@@ -166,7 +167,7 @@ where
 
 
     }
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest) {
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) {
 
         self.core_state.borrow().handle_append_entries_request(request);
 
@@ -295,7 +296,7 @@ where C: TypeConfig,
     FSM: StateMachine<C>
 {
 
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()> {
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()> {
 
         let core_state = self.core_state.read().unwrap();
         let core_state = core_state.borrow();
@@ -306,7 +307,7 @@ where C: TypeConfig,
 
     }
 
-    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest) -> Result<InstallSnapshotResponse, ()> {
+    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, ()> {
         todo!()
     }
 
@@ -318,7 +319,7 @@ where C: TypeConfig,
         todo!()
     }
 
-    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest) -> Result<ReplicaRecoverResponse, ()> {
+    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, ()> {
         let core_state = self.core_state.read().unwrap();
         let core_state = core_state.borrow();
         core_state.handle_append_entries_request(request).await;

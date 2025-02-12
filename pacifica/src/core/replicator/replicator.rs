@@ -1,3 +1,4 @@
+use std::cmp::max;
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::StateMachineCaller;
 use crate::core::lifecycle::Component;
@@ -6,11 +7,14 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
-use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
+use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, TaskSender};
 use crate::error::Fatal;
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse};
+use crate::rpc::message::{
+    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+};
 use crate::rpc::{RpcError, RpcOption};
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
+use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
     InstantOf, JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf,
     OneshotSenderOf,
@@ -20,7 +24,8 @@ use crate::{LogEntry, LogId, ReplicaClient, ReplicaId, ReplicaOption, StateMachi
 use std::rc::Weak;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use crate::storage::SnapshotReader;
+use std::time::Duration;
+use crate::core::replicator::caught_up_listener::CaughtUpListener;
 
 pub(crate) struct Replicator<C, FSM>
 where
@@ -35,12 +40,14 @@ where
     snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+    core_notification: Arc<CoreNotification<C>>,
     options: Arc<ReplicaOption>,
     replica_client: Arc<C::ReplicaClient>,
 
     // initial 1,
     next_log_index: AtomicUsize,
     last_rpc_response: InstantOf<C>,
+    caught_up_listener: Option<CaughtUpListener>,
 
     heartbeat_timer: RepeatedTimer<C, Task<C>>,
     task_sender: TaskSender<C, Task<C>>,
@@ -61,6 +68,7 @@ where
         snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+        core_notification: Arc<CoreNotification<C>>,
         options: Arc<ReplicaOption>,
         replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
@@ -78,10 +86,12 @@ where
             snapshot_executor,
             replica_group_agent,
             ballot_box,
+            core_notification,
             options,
 
             next_log_index: AtomicUsize::new(1), // initial is 1
             last_rpc_response: C::now(),
+            caught_up_listener: None,
             heartbeat_timer,
             task_sender: TaskSender::new(tx_task),
             rx_task,
@@ -95,6 +105,14 @@ where
     /// send probe request
     pub(crate) fn probe(&self) -> Result<(), Fatal<C>> {
         self.task_sender.send(Task::Probe)
+    }
+
+    pub(crate) fn block(&self) -> Result<(), Fatal<C>> {
+        self.block_until_timeout(self.options.heartbeat_interval())
+    }
+
+    pub(crate) fn block_until_timeout(&self, timeout: Duration) -> Result<(), Fatal<C>> {
+        self.task_sender.send(Task::Block { timeout })
     }
 
     // send install request
@@ -114,9 +132,11 @@ where
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
+            Task::Block { timeout } => self.handle_block(timeout).await?,
+
             Task::Probe => self.handle_probe().await?,
 
-            Task::Heartbeat => self.handle_heartbeat().await?,
+            Task::Heartbeat {timing} => self.handle_heartbeat(timing).await?,
 
             Task::AppendLogEntries => self.handle_append_log_entries().await?,
 
@@ -125,13 +145,23 @@ where
         Ok(())
     }
 
+    async fn handle_block(&mut self, timeout: Duration) -> Result<(), Fatal<C>> {
+        C::sleep_until(C::now() + timeout).await;
+        self.send_empty_entries().await?;
+        Ok(())
+    }
+
     async fn handle_probe(&mut self) -> Result<(), Fatal<C>> {
         self.send_empty_entries()?;
         Ok(())
     }
 
-    async fn handle_heartbeat(&mut self) -> Result<(), Fatal<C>> {
-        self.send_empty_entries()?;
+    async fn handle_heartbeat(&mut self, heartbeat_moment: InstantOf<C>) -> Result<(), Fatal<C>> {
+        let timeout = self.options.heartbeat_interval();
+        /// other request can also be considered heartbeat. reduce network overload.
+        if self.last_rpc_response + timeout < heartbeat_moment {
+            self.send_empty_entries()?;
+        }
         Ok(())
     }
 
@@ -144,8 +174,6 @@ where
         self.send_install_snapshot().await?;
         Ok(())
     }
-
-
 
     /// send empty entries request, it may be triggered by a Probe or a Heartbeat.
     /// install snapshot if not found LogEntry.
@@ -176,15 +204,14 @@ where
             }
             Some(mut append_log_request) => {
                 let continue_send = self.fill_append_entries_request(&mut append_log_request).await?;
-                self.do_send_append_entries_request(append_log_request).await?;
-                if continue_send {
+                let success = self.do_send_append_entries_request(append_log_request).await?;
+                if success && continue_send {
                     self.append_log_entries()?;
                 }
             }
         }
         Ok(())
     }
-
 
     async fn send_install_snapshot(&mut self) -> Result<(), Fatal<C>> {
         let snapshot_reader = self.snapshot_executor.open_snapshot_reader().await?;
@@ -195,13 +222,8 @@ where
                 let term = self.replica_group_agent.get_term();
                 let version = self.replica_group_agent.get_version();
                 let primary_id = self.primary_id.clone();
-                let install_snapshot_request = InstallSnapshotRequest::new(
-                    primary_id,
-                    term,
-                    version,
-                    snapshot_meta,
-                    reader_id
-                );
+                let install_snapshot_request =
+                    InstallSnapshotRequest::new(primary_id, term, version, snapshot_meta, reader_id);
                 self.do_send_install_snapshot_request(install_snapshot_request).await?;
             }
             None => {
@@ -271,7 +293,6 @@ where
         Ok(true)
     }
 
-
     async fn do_send_install_snapshot_request(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), Fatal<C>> {
         let target_id = self.target_id.clone();
         let rpc_option = RpcOption::default();
@@ -280,31 +301,29 @@ where
         self.handle_install_snapshot_result(rpc_result, snapshot_log_index)
     }
 
-    async fn do_send_append_entries_request(&mut self, request: AppendEntriesRequest<C>) -> Result<(), Fatal<C>> {
+    /// return true if success
+    async fn do_send_append_entries_request(&mut self, request: AppendEntriesRequest<C>) -> Result<bool, Fatal<C>> {
         let target_id = self.target_id.clone();
         let rpc_option = RpcOption::default();
-
+        let request_ctx = AppendEntriesContext {
+            prev_log_index: request.prev_log_id.index,
+            entry_num: request.entries.len(),
+        };
         let rpc_result = self.replica_client.append_entries(target_id, request, rpc_option).await;
-        match rpc_result {
-            Err(e) => {
-                tracing::error!("failed to send append_entries_request: {:?}", e);
-
-                self.probe()?;
-            }
-            Ok(append_entries_response) => {
-                // handle append entries response
-            }
-        }
-
-        Ok(())
+        let success = self.handle_append_log_entries_result(rpc_result, request_ctx)?;
+        Ok(success)
     }
 
-    fn handle_install_snapshot_result(&mut self, rpc_result: Result<InstallSnapshotResponse, RpcError>, snapshot_log_index: usize) -> Result<(), Fatal<C>> {
+    fn handle_install_snapshot_result(
+        &mut self,
+        rpc_result: Result<InstallSnapshotResponse, RpcError>,
+        snapshot_log_index: usize,
+    ) -> Result<(), Fatal<C>> {
         // TODO release snapshot reader
         match rpc_result {
             Err(e) => {
                 tracing::error!("failed to send install_snapshot_request : {:?}", e);
-                self.probe()?;
+                self.block()?;
             }
             Ok(response) => {
                 // handle install snapshot response
@@ -314,12 +333,19 @@ where
         Ok(())
     }
 
-    fn on_install_snapshot_response(&mut self, response: InstallSnapshotResponse, snapshot_log_index: usize) -> Result<(), Fatal<C>> {
+    fn on_install_snapshot_response(
+        &mut self,
+        response: InstallSnapshotResponse,
+        snapshot_log_index: usize,
+    ) -> Result<(), Fatal<C>> {
         match response {
             InstallSnapshotResponse::Success => {
                 let next_log_index = snapshot_log_index + 1;
                 self.next_log_index.store(next_log_index, Ordering::Relaxed);
-                tracing::info!("received success InstallSnapshotResponse, next_log_index: {}", next_log_index);
+                tracing::info!(
+                    "received success InstallSnapshotResponse, next_log_index: {}",
+                    next_log_index
+                );
                 // continue append log entries
                 self.append_log_entries()?;
             }
@@ -330,21 +356,100 @@ where
         Ok(())
     }
 
-    fn handle_append_log_entries_result(&mut self, rpc_result: Result<AppendEntriesResponse, RpcError>) -> Result<(), Fatal<C>> {
-
+    fn handle_append_log_entries_result(
+        &mut self,
+        rpc_result: Result<AppendEntriesResponse, RpcError>,
+        request_ctx: AppendEntriesContext,
+    ) -> Result<bool, Fatal<C>> {
+        let ret = match rpc_result {
+            Err(e) => {
+                tracing::error!("failed to send append_entries_request: {:?}", e);
+                // TODO block
+                self.block()?;
+                Ok(false)
+            }
+            Ok(append_entries_response) => {
+                // handle append entries response
+                let success = self.on_append_log_entries_response(append_entries_response, request_ctx)?;
+                Ok(success)
+            }
+        };
+        ret
     }
 
     fn on_append_log_entries_response(
-        &self,
-        start_log_index: u64,
-        end_log_index: u64,
+        &mut self,
         response: AppendEntriesResponse,
-    ) -> Result<(), Fatal<C>> {
-        // success
-        //
-        // self.ballot_box.ballot_by(self.target_id.clone(), start_log_index, end_log_index);
+        request_ctx: AppendEntriesContext,
+    ) -> Result<bool, Fatal<C>> {
+        let result = match response {
+            AppendEntriesResponse::HigherTerm { term } => {
+                self.core_notification.higher_term(term)?;
+                Ok(false)
+            }
+            AppendEntriesResponse::ConflictLog { last_log_index } => {
+                self.update_last_rpc_response();
+                let new_next_log_index = last_log_index + 1;
+                let cur_next_log_index = self.next_log_index.load(Ordering::Relaxed);
+                if new_next_log_index < cur_next_log_index {
+                    self.set_next_log_index(new_next_log_index);
+                } else {
+                    // The replica contains logs from old term which should be truncated,
+                    // decrease next_log_index by one to test the right index to keep
+                    self.set_next_log_index(cur_next_log_index - 1);
+                }
+                self.probe()?;
+                Ok(false)
+            }
+            AppendEntriesResponse::Success => {
+                self.update_last_rpc_response();
+                let start_log_index = request_ctx.prev_log_index + 1;
+                let end_log_index = request_ctx.prev_log_index + request_ctx.entry_num;
+                if end_log_index >= start_log_index && self.replicator_type.is_secondary() {
+                    // submit ballot
+                    let replica_id = self.target_id.clone();
+                    self.ballot_box.ballot_by(replica_id, start_log_index, end_log_index)?;
+                }
+                self.set_next_log_index(end_log_index + 1);
+                self.check_and_notify_caught_up(end_log_index)?;
+                Ok(true)
+            }
+        };
+        result
+    }
 
+    fn update_last_rpc_response(&mut self) {
+        self.last_rpc_response = C::now();
+    }
+
+    /// checks if the log has caught up, and notify an event if it has.
+    fn check_and_notify_caught_up(&mut self, last_log_index: usize) -> Result<(), Fatal<C>> {
+        match self.caught_up_listener.as_ref() {
+            Some(caught_up_listener) => {
+                loop {
+                    if last_log_index < self.fsm_caller.get_committed_log_index() {
+                        break
+                    }
+                    if last_log_index + caught_up_listener.get_max_margin() < self.log_manager.get_last_log_index() {
+                        break;
+                    }
+                    tracing::info!("success caught up");
+                    caught_up_listener.on_caught_up();
+                    
+                    self.caught_up_listener = None;
+                    break;
+                }
+            },
+            None => {
+
+            }
+        }
         Ok(())
+    }
+
+    fn set_next_log_index(&mut self, next_log_index: usize) {
+        let next_log_index = max(1, next_log_index);
+        self.next_log_index.store(next_log_index, Ordering::Relaxed);
     }
 }
 
@@ -403,9 +508,11 @@ enum Task<C>
 where
     C: TypeConfig,
 {
-    Heartbeat,
+    Heartbeat { timing: InstantOf<C> },
 
     Probe,
+
+    Block { timeout: Duration },
 
     AppendLogEntries,
 
@@ -419,6 +526,13 @@ where
     type Tick = Self<C>;
 
     fn new_tick() -> Self::Tick {
-        Self::Heartbeat
+        Self::Heartbeat {
+            timing: C::now(),
+        }
     }
+}
+
+struct AppendEntriesContext {
+    prev_log_index: usize,
+    entry_num: usize,
 }

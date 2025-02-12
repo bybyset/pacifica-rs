@@ -6,7 +6,7 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::Replicator;
 use crate::core::snapshot::{SnapshotError, SnapshotExecutor};
-use crate::core::{Lifecycle, ReplicaComponent, ResultSender, TaskSender};
+use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
 use crate::error::Fatal;
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
@@ -29,6 +29,7 @@ where
     snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+    core_notification: Arc<CoreNotification<C>>,
     options: Arc<ReplicaOption>,
 
     replicators: HashMap<ReplicaId<C>, ReplicaComponent<C, Replicator<C, FSM>>>,
@@ -48,6 +49,7 @@ where
         snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+        core_notification: Arc<CoreNotification<C>>,
         options: Arc<ReplicaOption>,
         replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
@@ -60,6 +62,7 @@ where
             replica_client,
             replica_group_agent,
             ballot_box,
+            core_notification,
             options,
 
             replicators: HashMap::new(),
@@ -165,6 +168,7 @@ where
             self.snapshot_executor.clone(),
             self.replica_client.clone(),
             self.ballot_box.clone(),
+            self.core_notification.clone(),
             self.options.clone(),
             self.replica_group_agent.clone(),
         );
