@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use crate::core::operation::Operation;
 use crate::core::task_sender::TaskSender;
-use crate::rpc::message::ReplicaRecoverRequest;
+use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 
 pub(crate) struct PrimaryState<C, FSM>
 where
@@ -29,6 +29,7 @@ where
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replicator_group: ReplicatorGroup<C, FSM>,
     lease_period_timer: RepeatedTimer<C, Task<C>>,
+    replica_option: Arc<ReplicaOption>,
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
@@ -57,6 +58,7 @@ where
             log_manager,
             replicator_group,
             lease_period_timer,
+            replica_option,
             tx_task: TaskSender::new(tx_task),
             rx_task,
         }
@@ -132,18 +134,21 @@ where
 
     }
 
-    pub(crate) async fn replica_recover(&self, request: ReplicaRecoverRequest<C>) {
+    pub(crate) async fn replica_recover(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, Fatal<C>> {
         // 必要检查
         let cur_version = self.replica_group_agent.get_version().await;
         if request.version != cur_version {
             //ERROR
+            return Ok(ReplicaRecoverResponse::higher_version(cur_version))
         }
         // 添加 Replicator
-        self.replicator_group.add_replicator(request.recover_id, ReplicatorType::Candidate);
+        self.replicator_group.add_replicator(request.recover_id, ReplicatorType::Candidate, true).await?;
 
         // 等待 caught up
+        let timeout = self.replica_option.recover_timeout();
+        let caught_up_result = self.replicator_group.wait_caught_up(request.recover_id, timeout).await;
 
-        self.replicator_group.wait_caught_up();
+        Ok(ReplicaRecoverResponse::success())
     }
 
 }

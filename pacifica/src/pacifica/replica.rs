@@ -121,7 +121,7 @@ impl<C, FSM> ReplicaBuilder<C, FSM> {
     }
 }
 
-impl<C, FSM> ReplicaService for Replica<C, FSM>
+impl<C, FSM> ReplicaService<C> for Replica<C, FSM>
 where C: TypeConfig, FSM: StateMachine<C>
 {
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()> {
@@ -130,7 +130,7 @@ where C: TypeConfig, FSM: StateMachine<C>
 
     async fn handle_install_snapshot_request(
         &self,
-        request: InstallSnapshotRequest,
+        request: InstallSnapshotRequest<C>,
     ) -> Result<InstallSnapshotResponse, ()> {
         self.replica_core.handle_install_snapshot_request(request).await
     }
@@ -148,7 +148,7 @@ where C: TypeConfig, FSM: StateMachine<C>
 
     async fn handle_replica_recover_request(
         &self,
-        request: ReplicaRecoverRequest,
+        request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, ()> {
         self.replica_core.handle_replica_recover_request(request).await
     }

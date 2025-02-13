@@ -14,6 +14,7 @@ pub mod operation;
 mod lifecycle;
 mod task_sender;
 mod core_notification;
+mod caught_up;
 
 pub(crate) type ResultSender<C, T, E> = OneshotSenderOf<C, Result<T, E>>;
 
@@ -24,4 +25,7 @@ pub(crate) use self::lifecycle::Lifecycle;
 
 pub(crate) use self::task_sender::TaskSender;
 pub(crate) use self::core_notification::CoreNotification;
+
+pub(crate) use self::caught_up::CaughtUpListener;
+pub(crate) use self::caught_up::CaughtUpError;
 

@@ -25,7 +25,7 @@ use std::rc::Weak;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use crate::core::replicator::caught_up_listener::CaughtUpListener;
+use crate::core::caught_up::CaughtUpListener;
 
 pub(crate) struct Replicator<C, FSM>
 where
@@ -47,7 +47,7 @@ where
     // initial 1,
     next_log_index: AtomicUsize,
     last_rpc_response: InstantOf<C>,
-    caught_up_listener: Option<CaughtUpListener>,
+    caught_up_listener: Mutex<Option<CaughtUpListener<C>>>,
 
     heartbeat_timer: RepeatedTimer<C, Task<C>>,
     task_sender: TaskSender<C, Task<C>>,
@@ -91,7 +91,7 @@ where
 
             next_log_index: AtomicUsize::new(1), // initial is 1
             last_rpc_response: C::now(),
-            caught_up_listener: None,
+            caught_up_listener: Mutex::new(None),
             heartbeat_timer,
             task_sender: TaskSender::new(tx_task),
             rx_task,
@@ -128,6 +128,20 @@ where
     ///
     pub(crate) fn get_type(&self) -> ReplicatorType {
         self.replicator_type
+    }
+
+    pub(crate) fn add_listener(&self, listener: CaughtUpListener<C>) -> bool {
+        let mut caught_up_listener = self.caught_up_listener.lock().unwrap();
+        if caught_up_listener.is_none() {
+            caught_up_listener.replace(listener);
+            return true
+        };
+        false
+    }
+
+    pub(crate) fn remove_listener(&self) {
+        let mut caught_up_listener = self.caught_up_listener.lock().unwrap();
+        let _ = caught_up_listener.take();
     }
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
@@ -423,20 +437,31 @@ where
     }
 
     /// checks if the log has caught up, and notify an event if it has.
-    fn check_and_notify_caught_up(&mut self, last_log_index: usize) -> Result<(), Fatal<C>> {
-        match self.caught_up_listener.as_ref() {
+    async fn check_and_notify_caught_up(&mut self, last_log_index: usize) -> Result<(), Fatal<C>> {
+        let mut caught_up_listener = self.caught_up_listener.lock().unwrap().as_mut();
+        match caught_up_listener {
             Some(caught_up_listener) => {
                 loop {
-                    if last_log_index < self.fsm_caller.get_committed_log_index() {
+                    // pre check
+                    if last_log_index < self.ballot_box.get_last_committed_index() {
                         break
                     }
                     if last_log_index + caught_up_listener.get_max_margin() < self.log_manager.get_last_log_index() {
                         break;
                     }
-                    tracing::info!("success caught up");
-                    caught_up_listener.on_caught_up();
-                    
-                    self.caught_up_listener = None;
+                    let caught_up_result = self.ballot_box.caught_up(self.target_id.clone(), last_log_index).await;
+                    match caught_up_result {
+                        Ok(caught_up) => {
+                            if caught_up {
+                                caught_up_listener.on_caught_up();
+                                self.replicator_type = ReplicatorType::Secondary;
+                                tracing::info!("success caught up");
+                            }
+                        },
+                        Err(e) => {
+                            caught_up_listener.on_error(e);
+                        }
+                    }
                     break;
                 }
             },

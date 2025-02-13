@@ -146,6 +146,9 @@ where
             NotificationMsg::CoreStateChange => {
                 self.handle_state_change().await?;
             }
+            NotificationMsg::HigherTerm { term } => {
+
+            }
         }
 
         Ok(())
@@ -291,7 +294,7 @@ where
     }
 }
 
-impl<C, FSM> ReplicaService for ReplicaCore<C, FSM>
+impl<C, FSM> ReplicaService<C> for ReplicaCore<C, FSM>
 where C: TypeConfig,
     FSM: StateMachine<C>
 {
@@ -322,7 +325,9 @@ where C: TypeConfig,
     async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, ()> {
         let core_state = self.core_state.read().unwrap();
         let core_state = core_state.borrow();
-        core_state.handle_append_entries_request(request).await;
-
+        let response = core_state.handle_replica_recover_request(request).await.map_err(|e| {
+            Err(())
+        })?;
+        Ok(response)
     }
 }

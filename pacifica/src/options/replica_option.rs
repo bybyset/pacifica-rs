@@ -103,4 +103,9 @@ impl ReplicaOption {
     pub fn recover_interval(&self) -> Duration {
         Duration::from_millis(self.recover_timeout_ms)
     }
+
+    pub fn recover_timeout(&self) -> Duration {
+        Duration::from_millis(self.recover_request_timeout_ms)
+    }
+
 }

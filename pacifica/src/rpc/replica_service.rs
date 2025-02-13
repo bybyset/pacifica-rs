@@ -3,18 +3,20 @@ use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::rpc::message::{TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::TypeConfig;
 
-pub trait ReplicaService {
+pub trait ReplicaService<C>
+where C: TypeConfig {
     /// Secondary or Candidate accepts the request and processes it.
     /// Sent by the Primary, sometimes it can be used as a heartbeat request
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()>;
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()>;
 
     /// Secondary or Candidate accepts the request and processes it.
     /// Sent by the Primary, Inform that there is a lack of LogEntry available and
     /// that a snapshot needs to be pulled.
     async fn handle_install_snapshot_request(
         &self,
-        request: InstallSnapshotRequest,
+        request: InstallSnapshotRequest<C>,
     ) -> Result<InstallSnapshotResponse, ()>;
 
     /// Secondary accepts the request and processes it.

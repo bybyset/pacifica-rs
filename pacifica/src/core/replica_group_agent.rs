@@ -150,7 +150,7 @@ where
         todo!()
     }
 
-    pub(crate) async fn add_secondary(&self, replica_id: &ReplicaId<C>) -> bool {
+    pub(crate) async fn add_secondary(&self, replica_id: ReplicaId<C>) -> bool {
         todo!()
     }
 

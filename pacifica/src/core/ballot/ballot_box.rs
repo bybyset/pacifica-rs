@@ -4,7 +4,7 @@ use crate::core::ballot::{ballot_box, Ballot};
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
-use crate::core::ResultSender;
+use crate::core::{CaughtUpError, ResultSender, TaskSender};
 use crate::error::{Fatal, PacificaError};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{
@@ -26,26 +26,32 @@ where
     FSM: StateMachine<C>,
 {
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
-    pending_index: AtomicUsize,
+    replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+    pending_index: AtomicUsize, // start_log_index of ballot_queue
     ballot_queue: VecDeque<BallotContext<C>>,
     last_committed_index: AtomicUsize,
-
-    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
+    tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
 impl<C, FSM> BallotBox<C, FSM>
 where
     C: TypeConfig,
+    FSM: StateMachine<C>,
 {
-    pub(crate) fn new(pending_index: usize, fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>) -> Self {
+    pub(crate) fn new(
+        pending_index: usize,
+        fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+        replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+    ) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let ballot_box = BallotBox {
             fsm_caller,
+            replica_group_agent,
             pending_index: AtomicUsize::new(pending_index),
             ballot_queue: VecDeque::new(),
             last_committed_index: AtomicUsize::new(0),
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
             rx_task,
         };
 
@@ -110,28 +116,49 @@ where
         let end_index = end_log_index - start_log_index;
         let ballots = self.ballot_queue.range(start_index..end_index);
         let mut log_index = start_log_index;
-        let mut last_granted = false;
+        let mut last_granted = true;
         for ballot in ballots {
             if ballot.grant(&replica_id) {
                 //
-                last_granted = true;
-                log_index = log_index + 1;
+                if last_granted {
+                    log_index = log_index + 1;
+                }
+            } else {
+                last_granted = false;
             }
         }
         let task = Task::CommitBallot { log_index };
-        self.submit_task(task)?;
-
+        self.tx_task.send(task)?;
         Ok(())
     }
 
-    pub(crate) fn recover_ballot(&self, replica_id: ReplicaId<C>, start_log_index: u64) -> Result<(), ()> {
-        todo!()
+    pub(crate) async fn caught_up(&self, replica_id: ReplicaId<C>, last_log_index: usize) -> Result<bool, CaughtUpError> {
+        let (tx, rx) = C::oneshot();
+        self.tx_task.send(Task::CaughtUp {
+            replica_id,
+            last_log_index,
+            callback: tx,
+        })?;
+        rx.await
     }
 
     pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
         let announce_result = Task::AnnounceBallots { commit_result };
         self.submit_task(announce_result)?;
         Ok(())
+    }
+
+    pub(crate) fn get_pending_index(&self) -> usize {
+        self.pending_index.load(Relaxed)
+    }
+    pub(crate) fn get_last_committed_index(&self) -> usize {
+        self.last_committed_index.load(Relaxed)
+    }
+
+    /// return true: last_log_index must greater than last_committed_index
+    ///
+    pub(crate) fn is_caught_up(&self, last_log_index: usize) -> bool {
+        last_log_index > self.get_last_committed_index()
     }
 
     fn submit_task(&self, task: Task<C>) -> Result<(), Fatal<C>> {
@@ -159,22 +186,30 @@ where
                 self.handle_commit_ballot(log_index)?;
             }
             Task::AnnounceBallots { commit_result } => self.handle_commit_result(commit_result)?,
+            Task::CaughtUp {
+                replica_id,
+                last_log_index,
+                callback,
+            } => {
+                let result = self.handle_caught_up(replica_id, last_log_index);
+                let _ = send_result(callback, result);
+            }
         }
 
         Ok(())
     }
 
-    async fn handle_commit_ballot(&mut self, end_log_index_inc: usize) -> Result<(), Fatal<C>> {
-        let last_committed_index = self.pending_index.load(Relaxed);
+    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), Fatal<C>> {
+        let last_committed_index = self.last_committed_index.load(Relaxed);
         let pending_log_index = self.pending_index.load(Relaxed);
-        if end_log_index_inc > last_committed_index {
+        if end_log_index_include > last_committed_index {
             let start_log_index = last_committed_index + 1;
             assert!(start_log_index >= pending_log_index);
-            assert!(end_log_index_inc < pending_log_index + self.ballot_queue.len());
+            assert!(end_log_index_include < pending_log_index + self.ballot_queue.len());
             let start_index = start_log_index - pending_log_index;
-            let end_index = end_log_index_inc - pending_log_index;
+            let end_index = end_log_index_include - pending_log_index;
 
-            let ballot_context = self.ballot_queue.get_mut(start_log_index);
+            let ballot_context = self.ballot_queue.get_mut(start_index);
             if let Some(ballot_context) = ballot_context {
                 let first_primary_term = ballot_context.primary_term;
                 let request = ballot_context.request.take();
@@ -187,7 +222,11 @@ where
                         requests.push(request);
                     }
                 }
+                let new_last_committed_index = start_log_index + requests.len();
                 self.fsm_caller.commit_batch(start_log_index, first_primary_term, requests)?;
+
+                // set new_last_committed_index
+                self.last_committed_index.store(new_last_committed_index, Relaxed);
             }
         }
         Ok(())
@@ -195,7 +234,7 @@ where
 
     fn handle_initiate_ballot(
         &mut self,
-        ballot: Ballot,
+        ballot: Ballot<C>,
         primary_term: usize,
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
@@ -234,13 +273,42 @@ where
 
         Ok(())
     }
+
+    fn handle_caught_up(&mut self, replica_id: ReplicaId<C>, last_log_index: usize) -> Result<bool, CaughtUpError> {
+        // check
+        if self.is_caught_up(last_log_index) {
+            // 1. add secondary with meta
+            if self.replica_group_agent.add_secondary(replica_id.clone()) {
+                return Err(CaughtUpError::MetaError)
+            }
+            // 2. recover ballot from last_log_index + 1.
+            self.do_recover_ballot(replica_id, last_log_index + 1);
+            return Ok(true)
+        }
+        Ok(false)
+    }
+
+    fn do_recover_ballot(&mut self, replica_id: ReplicaId<C>, start_log_index: usize) {
+        assert!(start_log_index >= self.get_pending_index());
+        assert!(start_log_index > self.get_last_committed_index());
+
+        let pending_index = self.pending_index.load(Relaxed);
+        let start_index = start_log_index - pending_index;
+        if start_index < self.ballot_queue.len() {
+            self.ballot_queue
+                .range_mut(start_index..) //
+                .for_each(|ballot_context| {
+                    ballot_context.ballot.add_quorum(replica_id);
+                });
+        }
+    }
 }
 
 pub(crate) struct BallotContext<C>
 where
     C: TypeConfig,
 {
-    pub(crate) ballot: Ballot,
+    pub(crate) ballot: Ballot<C>,
     pub(crate) primary_term: usize,
     pub(crate) request: Option<C::Request>,
     pub(crate) result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,

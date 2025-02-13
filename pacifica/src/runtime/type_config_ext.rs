@@ -1,7 +1,7 @@
 use crate::runtime::Mpsc;
 use crate::runtime::MpscUnbounded;
 use crate::runtime::Oneshot;
-use crate::type_config::alias::AsyncRuntimeOf;
+use crate::type_config::alias::{AsyncRuntimeOf, TimeoutOf};
 use crate::type_config::alias::InstantOf;
 use crate::type_config::alias::JoinHandleOf;
 use crate::type_config::alias::MpscOf;
@@ -17,6 +17,7 @@ use crate::type_config::alias::SleepOf;
 use crate::util::Instant;
 use crate::{AsyncRuntime, TypeConfig};
 use std::future::Future;
+use std::time::Duration;
 
 pub trait TypeConfigExt: TypeConfig {
     fn now() -> InstantOf<Self> {
@@ -66,6 +67,16 @@ pub trait TypeConfigExt: TypeConfig {
     fn sleep_until(deadline: InstantOf<Self>) -> SleepOf<Self> {
         AsyncRuntimeOf::<Self>::sleep_until(deadline)
     }
+
+    fn timeout<R, F: Future<Output = R> + Send> (duration: Duration, future: F) -> TimeoutOf<Self, R, F> {
+        AsyncRuntimeOf::<Self>::timeout(duration, future)
+    }
+
+    fn timeout_at<R, F: Future<Output = R> + Send>(deadline: InstantOf<Self>, future: F) -> TimeoutOf<Self, R, F> {
+        AsyncRuntimeOf::<Self>::timeout_at(deadline, future)
+    }
+
+
 }
 
 impl<T> TypeConfigExt for T where T: TypeConfig {}

@@ -38,7 +38,6 @@ pub trait TypeConfig {
 pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
     use crate::{AsyncRuntime, SnapshotStorage};
-    use crate::storage::SnapshotReader;
     use crate::TypeConfig;
 
     pub type AsyncRuntimeOf<C> = <C as TypeConfig>::AsyncRuntime;
@@ -49,6 +48,9 @@ pub mod alias {
     pub type JoinHandleOf<C, T> = <RT<C> as AsyncRuntime>::JoinHandle<T>;
     pub type InstantOf<C> = <RT<C> as AsyncRuntime>::Instant;
     pub type SleepOf<C> = <RT<C> as AsyncRuntime>::Sleep;
+    pub type TimeoutErrorOf<C> = <RT<C> as AsyncRuntime>::TimeoutError;
+    pub type TimeoutOf<C, R, F> = <RT<C> as AsyncRuntime>::Timeout<R, F>;
+
 
     pub type MpscOf<C> = <RT<C> as AsyncRuntime>::Mpsc;
 

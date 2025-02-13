@@ -1,4 +1,5 @@
 use crate::core::ballot::BallotBox;
+use crate::core::caught_up::CaughtUpListener;
 use crate::core::fsm::StateMachineCaller;
 use crate::core::lifecycle::Component;
 use crate::core::log::LogManager;
@@ -6,16 +7,17 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::Replicator;
 use crate::core::snapshot::{SnapshotError, SnapshotExecutor};
-use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
-use crate::error::Fatal;
+use crate::core::{CaughtUpError, CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
+use crate::error::{Fatal, PacificaError};
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
-use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
+use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf, TimeoutErrorOf, TimeoutOf};
 use crate::util::send_result;
 use crate::{LogId, ReplicaClient, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::Duration;
 
 pub(crate) struct ReplicatorGroup<C, FSM>
 where
@@ -120,8 +122,16 @@ where
         alive
     }
 
-    pub(crate) async fn wait_caught_up(&self, replica_id: ReplicaId<C>) -> Result<(), Fatal<C>> {
-        todo!()
+    pub(crate) async fn wait_caught_up(
+        &self,
+        replica_id: ReplicaId<C>,
+        timeout: Duration,
+    ) -> Result<(), CaughtUpError> {
+        //
+        // remove waiting
+        let result: Result<Result<(), CaughtUpError>, TimeoutErrorOf<C>>  = C::timeout(timeout, self.do_wait_caught_up(replica_id)).await;
+        let result = result.unwrap_or_else(|_timeout| Err(CaughtUpError::Timeout));
+        result
     }
 
     pub(crate) fn continue_replicate_log(&self, next_log_index: usize) {
@@ -142,7 +152,27 @@ where
         result
     }
 
-    async fn do_add_replicator(&self, target_id: ReplicaId<C>, replicator_type: ReplicatorType) -> Result<(), Fatal<C>> {
+    async fn do_wait_caught_up(&self, replica_id: ReplicaId<C>) -> Result<(), CaughtUpError> {
+        let replicator = self.replicators.get(&replica_id);
+        match replicator {
+            Some(replicator) => {
+                let (tx, callback) = C::oneshot();
+                let listener = CaughtUpListener::new(tx, 10);
+                if !replicator.add_listener(listener) {
+                    return Err(CaughtUpError::Repetition);
+                }
+                callback.await?;
+                Ok(())
+            }
+            None => Err(CaughtUpError::NoReplicator),
+        }
+    }
+
+    async fn do_add_replicator(
+        &self,
+        target_id: ReplicaId<C>,
+        replicator_type: ReplicatorType,
+    ) -> Result<(), Fatal<C>> {
         let (callback, rx) = C::oneshot();
         let _ = self.task_sender.send(Task::AddReplicator {
             target_id,
