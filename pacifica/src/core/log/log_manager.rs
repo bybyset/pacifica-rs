@@ -91,9 +91,9 @@ where
     async fn write_log_entries(
         &self,
         writer: &mut C::LogStorage::Writer,
-        log_entries: &Vec<LogEntry>,
+        log_entries: Vec<LogEntry>,
     ) -> Result<(), (usize, AnyError)> {
-        for (index, log_entry) in log_entries.iter().enumerate() {
+        for (index, log_entry) in log_entries.into_iter().enumerate() {
             let append_result = writer.append_entry(log_entry).await;
             if let Err(e) = append_result {
                 return Err((index, e));
@@ -106,7 +106,7 @@ where
     /// 异常后返回StorageError
     async fn append_to_storage(&self, log_entries: Vec<LogEntry>) -> Result<(), StorageError> {
         let mut writer = self.log_storage.open_writer().await.map_err(|e| StorageError::open_writer(e))?;
-        let write_result = self.write_log_entries(&mut writer, &log_entries).await;
+        let write_result = self.write_log_entries(&mut writer, log_entries).await;
         let flush_result = writer.flush().await;
         if let Err(e) = flush_result {
             // There is no guarantee that logs will be consistently written to disk.

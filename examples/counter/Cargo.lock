@@ -553,6 +553,7 @@ dependencies = [
  "anyerror",
  "anyhow",
  "byte-unit",
+ "byteorder",
  "bytes",
  "clap",
  "futures",

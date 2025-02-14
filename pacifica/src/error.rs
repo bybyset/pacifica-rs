@@ -38,6 +38,5 @@ where C: TypeConfig {
     #[error(transparent)]
     EncodeError(#[from] EncodeError<C::Request>),
 
-    Shutdown,
 }
 

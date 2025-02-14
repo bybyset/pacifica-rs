@@ -124,7 +124,7 @@ impl<C, FSM> ReplicaBuilder<C, FSM> {
 impl<C, FSM> ReplicaService<C> for Replica<C, FSM>
 where C: TypeConfig, FSM: StateMachine<C>
 {
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest) -> Result<AppendEntriesResponse, ()> {
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()> {
         self.replica_core.handle_append_entries_request(request).await
     }
 

@@ -29,6 +29,8 @@ pub use crate::fsm::StateMachine;
 pub use crate::storage::LogStorage;
 pub use crate::storage::LogReader;
 pub use crate::storage::LogWriter;
+pub use crate::storage::LogEntryCodec;
+pub use crate::storage::DefaultLogEntryCodec;
 pub use crate::storage::SnapshotStorage;
 pub use crate::storage::StorageError;
 

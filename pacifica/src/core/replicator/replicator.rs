@@ -12,7 +12,7 @@ use crate::error::Fatal;
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
 };
-use crate::rpc::{RpcError, RpcOption};
+use crate::rpc::{RpcClientError, RpcOption};
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
 use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
@@ -330,7 +330,7 @@ where
 
     fn handle_install_snapshot_result(
         &mut self,
-        rpc_result: Result<InstallSnapshotResponse, RpcError>,
+        rpc_result: Result<InstallSnapshotResponse, RpcClientError>,
         snapshot_log_index: usize,
     ) -> Result<(), Fatal<C>> {
         // TODO release snapshot reader
@@ -372,7 +372,7 @@ where
 
     fn handle_append_log_entries_result(
         &mut self,
-        rpc_result: Result<AppendEntriesResponse, RpcError>,
+        rpc_result: Result<AppendEntriesResponse, RpcClientError>,
         request_ctx: AppendEntriesContext,
     ) -> Result<bool, Fatal<C>> {
         let ret = match rpc_result {

@@ -18,7 +18,7 @@ tracing-appender = "0.2.3"
 tracing-futures = "0.2.5"
 
 bytes = "1.9.0"
-
+byteorder = "1.5.0"
 byte-unit = "5.1.4"
 thiserror = "2.0.3"
 anyerror = "0.1.12"
@@ -42,7 +42,7 @@ syn = "2.0"
 
 
 [workspace]
-members = ["pacifica", "macros", "extension/segment-logstore", "tests"]
+members = ["pacifica", "macros", "extension/segment-logstore", "tests", "extension/rocksdb-logstore"]
 
 exclude = [
     "examples/counter"

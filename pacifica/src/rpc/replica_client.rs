@@ -1,5 +1,5 @@
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
-use crate::rpc::RpcError;
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::rpc::RpcClientError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
 
@@ -42,32 +42,32 @@ where
         target: ReplicaId<C>,
         request: AppendEntriesRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<AppendEntriesResponse, RpcError>;
+    ) -> Result<AppendEntriesResponse, RpcClientError>;
 
     async fn install_snapshot(
         &self,
         target_id: ReplicaId<C>,
         request: InstallSnapshotRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<InstallSnapshotResponse, RpcError>;
+    ) -> Result<InstallSnapshotResponse, RpcClientError>;
 
     async fn replica_recover(
         &mut self,
         primary_id: ReplicaId<C>,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, RpcError>;
+    ) -> Result<ReplicaRecoverResponse, RpcClientError>;
 
-    async fn demise_primary(
+    async fn transfer_primary(
         &mut self,
         secondary_id: ReplicaId<C>,
-        request: DemisePrimaryRequest,
+        request: TransferPrimaryRequest,
         rpc_option: RpcOption,
-    ) -> Result<DemisePrimaryResponse, RpcError>;
+    ) -> Result<TransferPrimaryResponse, RpcClientError>;
 
     async fn get_file(
         &mut self,
         target_id: ReplicaId<C>,
         request: GetFileRequest,
         rpc_option: RpcOption,
-    ) -> Result<GetFileResponse, RpcError>;
+    ) -> Result<GetFileResponse, RpcClientError>;
 }
