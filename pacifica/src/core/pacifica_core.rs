@@ -43,12 +43,11 @@ where
     replica_client: Arc<C::ReplicaClient>,
     meta_client: Arc<C::MetaClient>,
 
-
     replica_option: Arc<ReplicaOption>,
 
     replicator_group: Option<ReplicatorGroup<C, FSM>>,
 
-    core_state: RwLock<RefCell<CoreState<C, FSM>>>,
+    core_state: CoreState<C, FSM>,
 }
 
 impl<C, FSM> ReplicaCore<C, FSM>
@@ -80,7 +79,7 @@ where
             snapshot_storage,
             log_manager.clone(),
             fsm_caller.clone(),
-            replica_option.clone()
+            replica_option.clone(),
         )));
 
         let meta_client = Arc::new(meta_client);
@@ -106,12 +105,8 @@ where
             replica_option,
 
             replicator_group: None,
-            core_state: RwLock::new(RefCell::new(CoreState::Shutdown)),
+            core_state: CoreState::Shutdown,
         }
-    }
-
-    async fn confirm_core_state(&mut self) {
-        self.replica_group.get_state(self.replica_id.clone());
     }
 
     async fn handle_api_msg(&mut self, msg: ApiMsg<C>) {
@@ -119,22 +114,21 @@ where
             ApiMsg::CommitOperation { operation } => {
                 self.handle_commit(operation);
             }
-            ApiMsg::Recovery {} => {}
+            ApiMsg::Recovery {} => {
 
+            }
             ApiMsg::SaveSnapshot {
                 callback
             } => {
                 let result = self.snapshot_executor.snapshot().await;
                 let _ = send_result(callback, result);
-            },
+            }
             ApiMsg::TransferPrimary {
                 new_primary
             } => {
                 self.handle_transfer_primary(new_primary);
             }
-            ApiMsg::StateChange {} => {
-
-            }
+            ApiMsg::StateChange {} => {}
         }
     }
 
@@ -146,9 +140,7 @@ where
             NotificationMsg::CoreStateChange => {
                 self.handle_state_change().await?;
             }
-            NotificationMsg::HigherTerm { term } => {
-
-            }
+            NotificationMsg::HigherTerm { term } => {}
         }
 
         Ok(())
@@ -166,48 +158,20 @@ where
         self.core_state.handle_commit_operation(operation);
     }
 
-    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {
-
-
-    }
+    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {}
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) {
-
         self.core_state.borrow().handle_append_entries_request(request);
-
     }
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
-        let core_state = self.core_state.write().unwrap();
-        let old_replica_state = core_state.get_replica_state();
-        let new_replica_state = self.replica_group.get_state(&self.replica_id).await;
+        let old_replica_state = self.core_state.get_replica_state();
+        let new_replica_state = self.replica_group.get_state(self.replica_id.clone()).await;
         if old_replica_state != new_replica_state {
             // state change
-            let new_core_state = match new_replica_state {
-                ReplicaState::Primary => {
-                    CoreState::new_primary(
-                        self.fsm_caller.clone(),
-                        self.log_manager.clone(),
-                        self.replica_group.clone(),
-                        self.replica_client.clone(),
-                        self.replica_option.clone()
-                    )
-                },
-                ReplicaState::Secondary => {
-                    todo!()
-                },
-                ReplicaState::Candidate => {
-                    todo!()
-                },
-                ReplicaState::Stateless => {
-                    todo!()
-                }
-                _ => {
-                    tracing::error!("");
-                    CoreState::Shutdown
-                }
-            };
-            core_state.replace(new_core_state);
+            let new_core_state = self.new_core_state(new_replica_state).await;
+            self.core_state = new_core_state;
         }
+        Ok(())
     }
 
     async fn handle_commit_operation(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
@@ -222,23 +186,61 @@ where
 
         Ok(())
     }
+
+    async fn new_core_state(&self, replica_state: ReplicaState) -> CoreState<C, FSM> {
+        match replica_state {
+            ReplicaState::Primary => {
+                let fsm_caller = self.fsm_caller.clone();
+                let log_manager = self.log_manager.clone();
+                let replica_group_agent = self.replica_group.clone();
+                let replica_client = self.replica_client.clone();
+                let replica_option = self.replica_option.clone();
+                CoreState::new_primary(fsm_caller, log_manager, replica_group_agent, replica_client, replica_option)
+            }
+            ReplicaState::Secondary => {
+                let fsm_caller = self.fsm_caller.clone();
+                let log_manager = self.log_manager.clone();
+                let replica_group_agent = self.replica_group.clone();
+                let core_notification = self.core_notification.clone();
+                let replica_option = self.replica_option.clone();
+                CoreState::new_secondary(fsm_caller, log_manager, replica_group_agent, core_notification, replica_option)
+            }
+            ReplicaState::Candidate => {
+                let fsm_caller = self.fsm_caller.clone();
+                let log_manager = self.log_manager.clone();
+                let replica_group_agent = self.replica_group.clone();
+                let replica_client = self.replica_client.clone();
+                let core_notification = self.core_notification.clone();
+                let replica_option = self.replica_option.clone();
+                CoreState::new_candidate(fsm_caller, log_manager, replica_group_agent, replica_client, core_notification, replica_option)
+            }
+            ReplicaState::Stateless => {
+                let replica_group_agent = self.replica_group.clone();
+                let core_notification = self.core_notification.clone();
+                let replica_option = self.replica_option.clone();
+                CoreState::new_stateless(replica_group_agent, core_notification, replica_option)
+            }
+            ReplicaState::Shutdown => {
+                CoreState::Shutdown
+            }
+        }
+    }
 }
 
 impl<C, FSM> Lifecycle<C> for ReplicaCore<C, FSM>
 where
     C: TypeConfig,
+    FSM: StateMachine<C>,
 {
     async fn startup(&mut self) -> Result<bool, Fatal<C>> {
         // startup log_manager
         self.log_manager.startup().await?;
         // startup fsm_caller
         self.fsm_caller.startup().await?;
-
         // startup snapshot_executor
         self.snapshot_executor.startup().await?;
-
         // confirm core_state by config cluster
-
+        self.handle_state_change().await?;
         Ok(true)
     }
 
@@ -257,6 +259,7 @@ where
 impl<C, FSM> Component<C> for ReplicaCore<C, FSM>
 where
     C: TypeConfig,
+    FSM: StateMachine<C>,
 {
     async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
         loop {
@@ -295,19 +298,15 @@ where
 }
 
 impl<C, FSM> ReplicaService<C> for ReplicaCore<C, FSM>
-where C: TypeConfig,
-    FSM: StateMachine<C>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
 {
-
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()> {
-
-        let core_state = self.core_state.read().unwrap();
-        let core_state = core_state.borrow();
-        core_state.handle_append_entries_request(request).await;
+        self.core_state.handle_append_entries_request(request).await;
 
 
         Ok(AppendEntriesResponse {})
-
     }
 
     async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, ()> {
@@ -323,9 +322,7 @@ where C: TypeConfig,
     }
 
     async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, ()> {
-        let core_state = self.core_state.read().unwrap();
-        let core_state = core_state.borrow();
-        let response = core_state.handle_replica_recover_request(request).await.map_err(|e| {
+        let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| {
             Err(())
         })?;
         Ok(response)

@@ -52,20 +52,20 @@ where
     ) -> Result<InstallSnapshotResponse, RpcClientError>;
 
     async fn replica_recover(
-        &mut self,
+        &self,
         primary_id: ReplicaId<C>,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcClientError>;
 
     async fn transfer_primary(
-        &mut self,
+        &self,
         secondary_id: ReplicaId<C>,
         request: TransferPrimaryRequest,
         rpc_option: RpcOption,
     ) -> Result<TransferPrimaryResponse, RpcClientError>;
 
     async fn get_file(
-        &mut self,
+        &self,
         target_id: ReplicaId<C>,
         request: GetFileRequest,
         rpc_option: RpcOption,

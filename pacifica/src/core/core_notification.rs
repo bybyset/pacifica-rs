@@ -31,4 +31,9 @@ where
         self.tx_notification.send(NotificationMsg::SendCommitResult { result })?;
         Ok(())
     }
+
+    pub(crate) fn core_state_change(&self) -> Result<(), Fatal<C>> {
+        self.tx_notification.send(NotificationMsg::CoreStateChange)?;
+        Ok(())
+    }
 }

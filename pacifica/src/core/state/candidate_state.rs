@@ -6,12 +6,15 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
 use crate::core::task_sender::TaskSender;
 use crate::error::Fatal;
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
 use crate::util::{RepeatedTimer, TickFactory};
 use crate::{ReplicaClient, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::Arc;
+use crate::config_cluster::ConfigClusterError;
+use crate::core::CoreNotification;
+use crate::rpc::RpcClientError;
 
 pub(crate) struct CandidateState<C, FSM>
 where
@@ -25,7 +28,7 @@ where
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replica_client: Arc<C::ReplicaClient>,
     append_entries_handler: AppendEntriesHandler<C, FSM>,
-    tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+    core_notification: Arc<CoreNotification<C>>,
 
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
@@ -41,7 +44,7 @@ where
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         replica_client: Arc<C::ReplicaClient>,
-        tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+        core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
 
     ) -> Self {
@@ -58,7 +61,7 @@ where
             replica_client,
             recover_timer,
             append_entries_handler,
-            tx_notification,
+            core_notification,
             tx_task: TaskSender::new(tx_task),
             rx_task,
         }
@@ -81,20 +84,44 @@ where
         // refresh replica group
 
 
-        let primary_id = self.replica_group_agent.primary().await?;
-        let request = ReplicaRecoverRequest::new()
-
-        let recover_result = self.replica_client.replica_recover(primary_id, ).await;
     }
 
-    fn do_recover(&mut self) {
-
+    async fn do_recover(&self) -> Result<(), RecoverError>{
+        let replica_group = self.replica_group_agent.force_refresh_get().await;
+        match replica_group {
+            Ok(replica_group) => {
+                let version = replica_group.version();
+                let term = replica_group.term();
+                let primary_id = replica_group.primary_id();
+                let recover_id = self.replica_group_agent.current_id();
+                let request = ReplicaRecoverRequest::new(term, version, recover_id);
+                let recover_response = self.replica_client.replica_recover(primary_id, request).await.map_err(|e| {
+                    RecoverError::RpcError(e)
+                })?;
+                match recover_response {
+                    ReplicaRecoverResponse::Success => {
+                        let _ = self.core_notification.core_state_change();
+                        Ok(())
+                    }
+                    ReplicaRecoverResponse::HigherTerm{ term } => {
+                        let _ = self.core_notification.higher_term(term);
+                        Err(RecoverError::HigherTerm {term})
+                    }
+                }
+            }
+            Err(e) => {
+                Err(RecoverError::MetaError(e))
+            }
+        }
     }
 
+    pub(crate) async fn recover(&self) -> Result<(), RecoverError> {
+
+    }
 
     pub(crate) async fn handle_append_entries_request(
         &self,
-        request: AppendEntriesRequest,
+        request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, Fatal<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await
     }
@@ -150,7 +177,7 @@ where
 {
     Recover,
 
-    AppendEntries { request: AppendEntriesRequest },
+    AppendEntries { request: AppendEntriesRequest<C> },
 }
 
 impl<C> TickFactory for Task<C>
@@ -162,4 +189,16 @@ where
     fn new_tick() -> Self::Tick {
         Self::Recover
     }
+}
+
+pub enum RecoverError {
+
+    RpcError(#[from] RpcClientError),
+
+    MetaError(#[from] ConfigClusterError),
+
+    HigherTerm {
+        term: usize
+    }
+
 }

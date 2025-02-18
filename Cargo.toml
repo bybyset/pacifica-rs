@@ -42,7 +42,7 @@ syn = "2.0"
 
 
 [workspace]
-members = ["pacifica", "macros", "extension/segment-logstore", "tests", "extension/rocksdb-logstore"]
+members = ["pacifica", "macros", "tests", "extension/segment-logstore",  "extension/rocksdb-logstore"]
 
 exclude = [
     "examples/counter"

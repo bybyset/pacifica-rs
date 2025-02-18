@@ -21,8 +21,8 @@ impl<C> ReplicaRecoverRequest<C> {
 
 pub enum ReplicaRecoverResponse {
     Success,
-    HigherVersion {
-        version: usize,
+    HigherTerm {
+        term: usize,
     }
 
 
@@ -33,8 +33,8 @@ impl ReplicaRecoverResponse {
     pub fn success() -> ReplicaRecoverResponse {
         ReplicaRecoverResponse::Success
     }
-    pub fn higher_version(version: usize) -> ReplicaRecoverResponse {
-        ReplicaRecoverResponse::HigherVersion { version }
+    pub fn higher_term(term: usize) -> ReplicaRecoverResponse {
+        ReplicaRecoverResponse::HigherTerm { term }
     }
 
 

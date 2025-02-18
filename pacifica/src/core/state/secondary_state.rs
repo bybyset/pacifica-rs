@@ -12,6 +12,7 @@ use crate::util::{Leased, RepeatedTimer, TickFactory};
 use crate::{LogEntry, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use crate::core::CoreNotification;
 
 pub(crate) struct SecondaryState<C, FSM>
 where
@@ -20,14 +21,11 @@ where
 {
     grace_period: Leased<InstantOf<C>>,
     grace_period_timer: RepeatedTimer<C, Task<C>>,
-
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-
     append_entries_handler: AppendEntriesHandler<C, FSM>,
-
-    tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+    core_notification: Arc<CoreNotification<C>>,
 
     tx_task: MpscUnboundedSenderOf<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
@@ -42,7 +40,7 @@ where
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-        tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>,
+        core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C> {
         let grace_period_timeout = replica_option.grace_period_timeout();
@@ -59,7 +57,7 @@ where
             log_manager,
             replica_group_agent,
             append_entries_handler,
-            tx_notification,
+            core_notification,
             tx_task,
             rx_task,
         }
@@ -87,7 +85,7 @@ where
             // 检测到主副本故障，竞争推选自己做为新的主副本
             if self.replica_group_agent.elect_self() {
                 // 通知ReplicaCore状态变更
-                self.tx_notification.send(NotificationMsg::CoreStateChange).map_err(|_| Fatal::Shutdown)?;
+                self.core_notification.core_state_change()?;
             }
         }
         Ok(())
@@ -95,7 +93,7 @@ where
 
     pub(crate) async fn handle_append_entries_request(
         &self,
-        request: AppendEntriesRequest,
+        request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, Fatal<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await
     }
@@ -153,7 +151,7 @@ where
 {
     GracePeriodCheck,
 
-    AppendEntries { request: AppendEntriesRequest },
+    AppendEntries { request: AppendEntriesRequest<C> },
 }
 
 impl<C> TickFactory for Task<C>
