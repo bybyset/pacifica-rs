@@ -11,7 +11,7 @@ use crate::core::snapshot::SnapshotExecutor;
 use crate::core::{CoreNotification, CoreState};
 use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
-use crate::rpc::ReplicaService;
+use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
@@ -126,9 +126,8 @@ where
             ApiMsg::TransferPrimary {
                 new_primary
             } => {
-                self.handle_transfer_primary(new_primary);
+                self.handle_transfer_primary(new_primary).await;
             }
-            ApiMsg::StateChange {} => {}
         }
     }
 
@@ -140,9 +139,27 @@ where
             NotificationMsg::CoreStateChange => {
                 self.handle_state_change().await?;
             }
-            NotificationMsg::HigherTerm { term } => {}
+            NotificationMsg::HigherTerm { term } => {
+                self.handle_receive_higher_term(term).await?;
+            }
+            NotificationMsg::HigherVersion {version} => {
+                self.handle_receive_higher_version(version).await?;
+            }
         }
+        Ok(())
+    }
 
+    async fn handle_receive_higher_term(&mut self, term: usize) -> Result<(), Fatal<C>> {
+        tracing::warn!("received higher term({})", term);
+        let _ = self.replica_group.force_refresh_get().await;
+        self.handle_state_change().await?;
+        Ok(())
+    }
+
+    async fn handle_receive_higher_version(&mut self, version: usize) -> Result<(), Fatal<C>> {
+        tracing::warn!("received higher version({})", version);
+        let _ = self.replica_group.force_refresh_get().await;
+        self.handle_state_change().await?;
         Ok(())
     }
 
@@ -159,16 +176,16 @@ where
     }
 
     async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {}
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) {
-        self.core_state.borrow().handle_append_entries_request(request);
-    }
+
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
         let old_replica_state = self.core_state.get_replica_state();
         let new_replica_state = self.replica_group.get_state(self.replica_id.clone()).await;
         if old_replica_state != new_replica_state {
             // state change
-            let new_core_state = self.new_core_state(new_replica_state).await;
+            let mut new_core_state = self.new_core_state(new_replica_state).await;
+            new_core_state.startup().await?;
+            let _ = self.core_state.shutdown().await;
             self.core_state = new_core_state;
         }
         Ok(())
@@ -302,26 +319,24 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()> {
-        self.core_state.handle_append_entries_request(request).await;
-
-
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError> {
+        let response = self.core_state.handle_append_entries_request(request).await;
         Ok(AppendEntriesResponse {})
     }
 
-    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, ()> {
+    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, RpcServiceError> {
         todo!()
     }
 
-    async fn handle_transfer_primary_request(&self, request: TransferPrimaryRequest) -> Result<TransferPrimaryResponse, ()> {
+    async fn handle_transfer_primary_request(&self, request: TransferPrimaryRequest) -> Result<TransferPrimaryResponse, RpcServiceError> {
         todo!()
     }
 
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, ()> {
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
         todo!()
     }
 
-    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, ()> {
+    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, RpcServiceError> {
         let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| {
             Err(())
         })?;

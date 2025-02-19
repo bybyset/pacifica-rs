@@ -104,13 +104,13 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
         self.grace_period_timer.turn_on();
 
-        Ok(true)
+        Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         self.grace_period_timer.shutdown();
         todo!()
     }

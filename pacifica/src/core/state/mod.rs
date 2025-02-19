@@ -1,6 +1,6 @@
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
-use crate::core::lifecycle::ReplicaComponent;
+use crate::core::lifecycle::{Component, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
@@ -8,9 +8,10 @@ use crate::core::state::candidate_state::CandidateState;
 use crate::core::state::primary_state::PrimaryState;
 use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
-use crate::core::CoreNotification;
+use crate::core::{CoreNotification, Lifecycle};
 use crate::error::Fatal;
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
+use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaClient, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
 
@@ -25,10 +26,18 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    Primary { primary: PrimaryState<C, FSM> },
-    Secondary { state: SecondaryState<C, FSM> },
-    Candidate { state: CandidateState<C, FSM> },
-    Stateless { state: StatelessState<C> },
+    Primary {
+        state: ReplicaComponent<C, PrimaryState<C, FSM>>,
+    },
+    Secondary {
+        state: ReplicaComponent<C, SecondaryState<C, FSM>>,
+    },
+    Candidate {
+        state: ReplicaComponent<C, CandidateState<C, FSM>>,
+    },
+    Stateless {
+        state: ReplicaComponent<C, StatelessState<C>>,
+    },
     Shutdown,
 }
 
@@ -55,7 +64,9 @@ where
             replica_option,
         );
 
-        CoreState::Primary { primary: primary_state }
+        CoreState::Primary {
+            state: ReplicaComponent::new(primary_state),
+        }
     }
 
     pub(crate) fn new_secondary(
@@ -65,14 +76,16 @@ where
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C, FSM> {
-        let secondary = SecondaryState::new(
+        let state = SecondaryState::new(
             fsm_caller,
             log_manager,
             replica_group_agent,
             core_notification,
             replica_option,
         );
-        CoreState::Secondary { state: secondary }
+        CoreState::Secondary {
+            state: ReplicaComponent::new(state),
+        }
     }
 
     pub(crate) fn new_candidate(
@@ -92,7 +105,9 @@ where
             replica_option,
         );
 
-        CoreState::Candidate { state }
+        CoreState::Candidate {
+            state: ReplicaComponent::new(state),
+        }
     }
 
     pub(crate) fn new_stateless(
@@ -101,7 +116,9 @@ where
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C, FSM> {
         let state = StatelessState::new(replica_group_agent, core_notification, replica_option);
-        CoreState::Stateless { state }
+        CoreState::Stateless {
+            state: ReplicaComponent::new(state),
+        }
     }
 
     pub(crate) fn is_primary(&self) -> bool {
@@ -131,14 +148,14 @@ where
             CoreState::Secondary => ReplicaState::Secondary,
             CoreState::Candidate => ReplicaState::Candidate,
             CoreState::Shutdown => ReplicaState::Shutdown,
-            CoreState::Stateless => ReplicaState::Stateless
+            CoreState::Stateless => ReplicaState::Stateless,
         };
         state
     }
 
     pub(crate) fn commit_operation(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
         match self {
-            CoreState::Primary { primary } => {
+            CoreState::Primary { state: primary } => {
                 primary.commit(operation)?;
             }
             _ => {
@@ -150,7 +167,7 @@ where
 
     pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), Fatal<C>> {
         match self {
-            CoreState::Primary { primary } => {
+            CoreState::Primary { state: primary } => {
                 primary.send_commit_result(result)?;
             }
             _ => {
@@ -160,7 +177,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) {
+    pub(crate) async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()>{
         match self {
             CoreState::Secondary { state } => {
                 state.handle_append_entries_request(request).await;
@@ -179,7 +196,7 @@ where
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, Fatal<C>> {
         match self {
-            CoreState::Primary { primary } => primary.replica_recover(request).await,
+            CoreState::Primary { state: primary } => primary.replica_recover(request).await,
             _ => {
                 tracing::warn!("");
                 Err(Fatal::Shutdown)
@@ -188,4 +205,28 @@ where
     }
 }
 
+impl<C, FSM> Lifecycle<C> for CoreState<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+        match self {
+            CoreState::Primary { state: primary } => primary.startup().await,
+            CoreState::Secondary { state } => state.startup().await,
+            CoreState::Candidate { state } => state.startup().await,
+            CoreState::Stateless { state } => state.startup().await,
+            CoreState::Shutdown => Ok(()),
+        }
+    }
 
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+        match self {
+            CoreState::Primary { state: primary } => primary.shutdown().await,
+            CoreState::Secondary { state } => state.shutdown().await,
+            CoreState::Candidate { state } => state.shutdown().await,
+            CoreState::Stateless { state } => state.shutdown().await,
+            CoreState::Shutdown => Ok(()),
+        }
+    }
+}

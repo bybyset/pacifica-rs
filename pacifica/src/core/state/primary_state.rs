@@ -103,6 +103,7 @@ where
         //init and append ballot box for the operation
         let log_term = self.replica_group_agent.get_term();
         let replica_group = self.replica_group_agent.get_replica_group().await;
+        
         let log_index_result = self
             .ballot_box
             .initiate_ballot(replica_group, log_term, operation.request, operation.callback)
@@ -162,7 +163,7 @@ where
     LeasePeriodCheck,
 
     ReplicaRecover {
-        request: ReplicaRecoverRequest
+        request: ReplicaRecoverRequest<C>
     }
 }
 
@@ -182,18 +183,18 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
         // startup ballot box
         self.ballot_box.startup().await?;
         self.lease_period_timer.turn_on();
         // reconciliation
         self.reconciliation()?;
-        Ok(true)
+        Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         self.ballot_box.shutdown().await?;
-        Ok(true)
+        Ok(())
     }
 }
 

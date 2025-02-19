@@ -27,6 +27,11 @@ where
         Ok(())
     }
 
+    pub(crate) fn higher_version(&self, version: usize) -> Result<(), Fatal<C>> {
+        self.tx_notification.send(NotificationMsg::HigherVersion { version })?;
+        Ok(())
+    }
+
     pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), Fatal<C>> {
         self.tx_notification.send(NotificationMsg::SendCommitResult { result })?;
         Ok(())

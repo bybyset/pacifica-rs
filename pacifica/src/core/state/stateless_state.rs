@@ -71,14 +71,14 @@ impl<C> Lifecycle<C> for StatelessState<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
         self.state_check_timer.turn_on();
-        Ok(true)
+        Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         self.state_check_timer.shutdown();
-        Ok(true)
+        Ok(())
     }
 }
 

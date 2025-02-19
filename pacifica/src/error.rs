@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Formatter};
 use anyerror::AnyError;
 use thiserror::Error;
+use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
 use crate::storage::error::StorageError;
 use crate::TypeConfig;
@@ -37,6 +38,10 @@ where C: TypeConfig {
 
     #[error(transparent)]
     EncodeError(#[from] EncodeError<C::Request>),
+
+    MetaError(#[from] MetaError),
+
+    StorageError(#[from] StorageError)
 
 }
 

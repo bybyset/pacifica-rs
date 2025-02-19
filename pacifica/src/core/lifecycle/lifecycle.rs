@@ -12,10 +12,10 @@ where
 {
     /// phase: startup
     /// return ture if success startup.
-    async fn startup(&mut self) -> Result<bool, Fatal<C>>;
+    async fn startup(&mut self) -> Result<(), Fatal<C>>;
 
     /// phase: shutdown
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>>;
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>>;
 }
 
 pub(crate) trait Component<C>: Lifecycle<C>
@@ -53,12 +53,12 @@ impl<C> Lifecycle<C> for ReplicaComponent<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match shutdown {
             Some(_) => {
                 // repeated startup
-                Ok(false)
+                Ok(())
             }
             None => {
                 let (tx_shutdown, rx_shutdown) = C::oneshot();
@@ -68,17 +68,17 @@ where
 
                 self.component.startup()?;
 
-                Ok(true)
+                Ok(())
             }
         }
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match shutdown {
             None => {
                 // repeated shutdown or un startup
-                Ok(false)
+                Ok(())
             }
             Some(tx_shutdown) => {
                 // send shutdown msg
@@ -88,7 +88,7 @@ where
                     let _ = loop_handler.await;
                 }
                 self.component.shutdown()?;
-                Ok(true)
+                Ok(())
             }
         }
     }

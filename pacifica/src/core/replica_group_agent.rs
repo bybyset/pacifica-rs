@@ -1,4 +1,4 @@
-use crate::config_cluster::ConfigClusterError;
+use crate::config_cluster::MetaError;
 use crate::core::fsm::StateMachineError;
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::notification_msg::NotificationMsg;
@@ -69,7 +69,7 @@ where
         Ok(())
     }
 
-    async fn handle_refresh(&mut self) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    async fn handle_refresh(&mut self) -> Result<ReplicaGroup<C>, MetaError> {
         while self.replica_group.is_none() {
             let replica_group = self.get_replica_group_by_meta().await;
             if let Some(replica_group) = replica_group {
@@ -85,12 +85,12 @@ where
         result
     }
 
-    async fn force_refresh_get_replica_group(&mut self) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    async fn force_refresh_get_replica_group(&mut self) -> Result<ReplicaGroup<C>, MetaError> {
         let _ = self.replica_group.take();
         self.refresh_get_replica_group().await
     }
 
-    async fn refresh_get_replica_group(&mut self) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    async fn refresh_get_replica_group(&mut self) -> Result<ReplicaGroup<C>, MetaError> {
         let replica_group = self.replica_group.as_ref().cloned();
         match replica_group {
             Some(replica_group) => Ok(replica_group),
@@ -107,7 +107,7 @@ where
         }
     }
 
-    async fn retry_get_replica_group(&self, max_retries: i32) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    async fn retry_get_replica_group(&self, max_retries: i32) -> Result<ReplicaGroup<C>, MetaError> {
         let group_name = self.current_id.group_name();
         let mut retry_count = max_retries;
         loop {
@@ -115,7 +115,7 @@ where
             match result {
                 Ok(replica_group) => return Ok(replica_group),
                 Err(e) => match e {
-                    ConfigClusterError::Timeout => {
+                    MetaError::Timeout => {
                         retry_count = retry_count - 1;
                         if retry_count >= 0 {
                             continue;
@@ -130,26 +130,26 @@ where
         }
     }
 
-    async fn handle_elect_self(&mut self) -> Result<(), ConfigClusterError> {
+    async fn handle_elect_self(&mut self) -> Result<(), MetaError> {
         let new_primary = self.current_id.clone();
         let replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.change_primary(new_primary, replica_group.version()).await;
         result
     }
 
-    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), ConfigClusterError> {
+    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
         let replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.remove_secondary(replica_id, replica_group.version()).await;
         result
     }
 
-    async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), ConfigClusterError> {
+    async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
         let replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.add_secondary(replica_id, replica_group.version()).await;
         result
     }
 
-    pub(crate) async fn get_replica_group(&self) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    pub(crate) async fn get_replica_group(&self) -> Result<ReplicaGroup<C>, MetaError> {
         let replica_group = self.replica_group.as_ref().cloned();
         if let Some(replica_group) = replica_group {
             Ok(replica_group)
@@ -180,7 +180,7 @@ where
         }
     }
 
-    pub(crate) async fn force_refresh_get(&self) -> Result<ReplicaGroup<C>, ConfigClusterError> {
+    pub(crate) async fn force_refresh_get(&self) -> Result<ReplicaGroup<C>, MetaError> {
         let (tx, rx) = C::oneshot();
         self.tx_task.send(Task::ForceRefreshGet { callback: tx }).map_err(|_| Fatal::Shutdown)?;
         rx.await
@@ -307,21 +307,21 @@ where
     C: TypeConfig,
 {
     ForceRefreshGet {
-        callback: ResultSender<C, ReplicaGroup<C>, ConfigClusterError>,
+        callback: ResultSender<C, ReplicaGroup<C>, MetaError>,
     },
     RefreshGet {
-        callback: ResultSender<C, ReplicaGroup<C>, ConfigClusterError>,
+        callback: ResultSender<C, ReplicaGroup<C>, MetaError>,
     },
 
     ElectSelf {
-        callback: ResultSender<C, (), ConfigClusterError>,
+        callback: ResultSender<C, (), MetaError>,
     },
     RemoveSecondary {
         replica_id: ReplicaId<C>,
-        callback: ResultSender<C, (), ConfigClusterError>,
+        callback: ResultSender<C, (), MetaError>,
     },
     AddSecondary {
         replica_id: ReplicaId<C>,
-        callback: ResultSender<C, (), ConfigClusterError>,
+        callback: ResultSender<C, (), MetaError>,
     },
 }

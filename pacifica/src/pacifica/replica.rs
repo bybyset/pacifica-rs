@@ -9,7 +9,7 @@ use crate::rpc::message::{
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
     TransferPrimaryResponse,
 };
-use crate::rpc::ReplicaService;
+use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::type_config::alias::MpscUnboundedSenderOf;
 use crate::ReplicaId;
@@ -50,7 +50,6 @@ where
         RC: ReplicaClient<C>,
     {
         let (tx_api, rx_api) = C::mpsc_unbounded();
-        // send message replica_inner to replica_core
         let replica_core = ReplicaCore::new(
             replica_id,
             rx_api,
@@ -124,32 +123,32 @@ impl<C, FSM> ReplicaBuilder<C, FSM> {
 impl<C, FSM> ReplicaService<C> for Replica<C, FSM>
 where C: TypeConfig, FSM: StateMachine<C>
 {
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()> {
+    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError> {
         self.replica_core.handle_append_entries_request(request).await
     }
 
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, ()> {
+    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
         self.replica_core.handle_install_snapshot_request(request).await
     }
 
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest,
-    ) -> Result<TransferPrimaryResponse, ()> {
+    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
         self.handle_transfer_primary_request(request).await
     }
 
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, ()> {
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
         self.handle_get_file_request(request).await
     }
 
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, ()> {
+    ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
         self.replica_core.handle_replica_recover_request(request).await
     }
 }

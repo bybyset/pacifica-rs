@@ -37,8 +37,8 @@ pub enum AppendEntriesResponse {
 }
 
 impl AppendEntriesResponse {
-    pub fn success(term: usize, last_log_index: usize) -> Self {
-        AppendEntriesResponse::Success { term, last_log_index }
+    pub fn success() -> Self {
+        AppendEntriesResponse::Success
     }
 
     pub fn higher_term(term: usize) -> Self {

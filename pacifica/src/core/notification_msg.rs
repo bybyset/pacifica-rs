@@ -13,6 +13,9 @@ where
     /// Show that the current replica group conf is expired
     HigherTerm {
         term: usize,
+    },
+    HigherVersion {
+        version: usize,
     }
 
 

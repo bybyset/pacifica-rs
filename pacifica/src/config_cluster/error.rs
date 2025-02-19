@@ -1,4 +1,4 @@
-pub enum ConfigClusterError {
+pub enum MetaError {
 
     Timeout,
 
@@ -10,10 +10,5 @@ pub enum ConfigClusterError {
         expect: u64,
         actual: u64
     }
-
-
-
-
-
 
 }

@@ -12,7 +12,7 @@ use crate::type_config::alias::{MpscUnboundedReceiverOf, MpscUnboundedSenderOf, 
 use crate::util::{RepeatedTimer, TickFactory};
 use crate::{ReplicaClient, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::Arc;
-use crate::config_cluster::ConfigClusterError;
+use crate::config_cluster::MetaError;
 use crate::core::CoreNotification;
 use crate::rpc::RpcClientError;
 
@@ -131,13 +131,13 @@ impl<C, FSM> Lifecycle<C> for CandidateState<C, FSM>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
         self.recover_timer.turn_on();
 
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         todo!()
     }
 }
@@ -195,7 +195,7 @@ pub enum RecoverError {
 
     RpcError(#[from] RpcClientError),
 
-    MetaError(#[from] ConfigClusterError),
+    MetaError(#[from] MetaError),
 
     HigherTerm {
         term: usize
