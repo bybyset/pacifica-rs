@@ -22,7 +22,6 @@ where
     term: usize,
 }
 
-
 impl<C> Display for ReplicaGroupWrapper<C>
 where
     C: TypeConfig,
@@ -40,7 +39,13 @@ impl<C> ReplicaGroup<C>
 where
     C: TypeConfig,
 {
-    pub fn new(group_name: String, version: usize, term: usize, primary: C::NodeId, secondaries: Vec<C::NodeId>) -> Self <C> {
+    pub fn new(
+        group_name: String,
+        version: usize,
+        term: usize,
+        primary: C::NodeId,
+        secondaries: Vec<C::NodeId>,
+    ) -> Self<C> {
         let group_wrapper = ReplicaGroupWrapper {
             group_name,
             primary,
@@ -49,7 +54,7 @@ where
             term,
         };
         ReplicaGroup {
-            inner: Arc::new(group_wrapper)
+            inner: Arc::new(group_wrapper),
         }
     }
 
@@ -68,7 +73,8 @@ where
 
     /// get the secondary of the current replica group
     pub fn secondary_ids(&self) -> Vec<ReplicaId<C>> {
-        self.inner.secondaries
+        self.inner
+            .secondaries
             .iter()
             .map(|node_id| ReplicaId::new(self.inner.primary.clone(), node_id.clone()))
             .collect()
@@ -86,5 +92,22 @@ where
 
     pub fn group_name(&self) -> String {
         self.inner.group_name.clone()
+    }
+
+    pub fn remove_secondary(&mut self, node_id: &C::NodeId) {
+        let removed = self.inner.secondaries.iter().position(
+            |x| x == node_id
+        );
+        assert!(removed.is_some());
+        if let Some(index) = removed {
+            self.inner.secondaries.remove(index);
+            self.inner.version = self.inner.version + 1;
+        }
+    }
+
+    pub fn add_secondary(&mut self, node_id: C::NodeId) {
+        assert!(!self.inner.secondaries.contains(&node_id));
+        self.inner.secondaries.push(node_id);
+        self.inner.version = self.inner.version + 1;
     }
 }

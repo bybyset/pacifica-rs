@@ -19,12 +19,12 @@ where
         ReplicaId { inner: Arc::new(inner) }
     }
 
-    pub fn group_name(&self) -> &String {
-        &self.inner.group_name
+    pub fn group_name(&self) -> String {
+        self.inner.group_name.clone()
     }
 
-    pub fn node_id(&self) -> &C::NodeId {
-        &self.inner.node_id
+    pub fn node_id(&self) -> C::NodeId {
+        self.inner.node_id.clone()
     }
 }
 

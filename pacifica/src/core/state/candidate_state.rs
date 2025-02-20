@@ -5,7 +5,7 @@ use crate::core::notification_msg::NotificationMsg;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
 use crate::core::task_sender::TaskSender;
-use crate::error::Fatal;
+use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
@@ -122,7 +122,7 @@ where
     pub(crate) async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,
-    ) -> Result<AppendEntriesResponse, Fatal<C>> {
+    ) -> Result<AppendEntriesResponse, PacificaError<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await
     }
 }

@@ -111,7 +111,7 @@ where
         let group_name = self.current_id.group_name();
         let mut retry_count = max_retries;
         loop {
-            let result = self.meta_client.get_replica_group(group_name).await;
+            let result = self.meta_client.get_replica_group(&group_name).await;
             match result {
                 Ok(replica_group) => return Ok(replica_group),
                 Err(e) => match e {
@@ -138,14 +138,22 @@ where
     }
 
     async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
-        let replica_group = self.refresh_get_replica_group().await?;
-        let result = self.meta_client.remove_secondary(replica_id, replica_group.version()).await;
+        let mut replica_group = self.refresh_get_replica_group().await?;
+        let result = self.meta_client.remove_secondary(replica_id.clone(), replica_group.version()).await;
+        if result.is_ok() {
+            let node_id = replica_id.node_id();
+            replica_group.remove_secondary(node_id)
+        }
         result
     }
 
     async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
-        let replica_group = self.refresh_get_replica_group().await?;
-        let result = self.meta_client.add_secondary(replica_id, replica_group.version()).await;
+        let mut replica_group = self.refresh_get_replica_group().await?;
+        let result = self.meta_client.add_secondary(replica_id.clone(), replica_group.version()).await;
+        if result.is_ok() {
+            let node_id = replica_id.node_id();
+            replica_group.add_secondary(node_id)
+        }
         result
     }
 

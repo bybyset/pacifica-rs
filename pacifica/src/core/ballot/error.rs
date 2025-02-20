@@ -1,15 +1,14 @@
 use crate::core::ballot::task::Task;
-use crate::ReplicaId;
+use crate::{ReplicaId, TypeConfig};
 use crate::runtime::SendError;
 
-pub(crate) enum BallotError {
+pub(crate) enum BallotError<C>
+where C: TypeConfig {
 
-    Shutdown {
-        task: Task,
-    },
+ 
 
     BallotByErr {
-        replica_id: ReplicaId,
+        replica_id: ReplicaId<C>,
         start_log_index: u64,
         end_log_index: u64
     }

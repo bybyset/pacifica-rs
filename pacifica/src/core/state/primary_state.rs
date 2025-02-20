@@ -2,34 +2,35 @@ use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
+use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
-use crate::core::{operation, replicator};
 use crate::core::replicator::{ReplicatorGroup, ReplicatorType};
+use crate::core::snapshot::SnapshotExecutor;
+use crate::core::task_sender::TaskSender;
+use crate::core::{operation, replicator, CoreNotification};
 use crate::error::{Fatal, PacificaError};
-use crate::model::{LogEntryPayload};
+use crate::model::LogEntryPayload;
+use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{
     JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::{RepeatedTimer, TickFactory};
-use crate::{LogEntry, LogId, ReplicaClient, ReplicaGroup, ReplicaOption, StateMachine, TypeConfig};
+use crate::{LogEntry, LogId, ReplicaClient, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use crate::core::operation::Operation;
-use crate::core::task_sender::TaskSender;
-use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 
 pub(crate) struct PrimaryState<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    ballot_box: ReplicaComponent<C, BallotBox<C, FSM>>,
+    ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+    replica_option: Arc<ReplicaOption>,
     replicator_group: ReplicatorGroup<C, FSM>,
     lease_period_timer: RepeatedTimer<C, Task<C>>,
-    replica_option: Arc<ReplicaOption>,
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
@@ -43,34 +44,47 @@ where
         next_log_index: usize,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+        snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+        core_notification: Arc<CoreNotification<C>>,
         replica_client: Arc<C::ReplicaClient>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C> {
-        let ballot_box = ReplicaComponent::new(BallotBox::new(next_log_index, fsm_caller));
-        let replicator_group = ReplicatorGroup::new(replica_client);
-        let lease_period_timeout = replica_option.lease_period_timeout();
+        let ballot_box = ReplicaComponent::new(BallotBox::new(
+            next_log_index,
+            fsm_caller.clone(),
+            replica_group_agent.clone(),
+        ));
+        let ballot_box = Arc::new(ballot_box);
+        let replicator_group = ReplicatorGroup::new(
+            log_manager.clone(),
+            fsm_caller.clone(),
+            snapshot_executor.clone(),
+            replica_group_agent.clone(),
+            ballot_box.clone(),
+            core_notification,
+            replica_option.clone(),
+            replica_client,
+        );
         let (tx_task, rx_task) = C::mpsc_unbounded();
+        let lease_period_timeout = replica_option.lease_period_timeout();
         let lease_period_timer = RepeatedTimer::new(lease_period_timeout, tx_task.clone(), false);
         Self {
             ballot_box,
             replica_group_agent,
             log_manager,
+            replica_option,
             replicator_group,
             lease_period_timer,
-            replica_option,
             tx_task: TaskSender::new(tx_task),
             rx_task,
         }
     }
 
-
     pub(crate) fn commit(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
         self.submit_task(Task::Commit { operation })?;
         Ok(())
     }
-
-
 
     pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
         self.ballot_box.announce_result(commit_result)
@@ -86,13 +100,12 @@ where
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
             Task::Commit { operation } => self.handle_commit_task(operation).await?,
-            Task::LeasePeriodCheck => {
 
-            }
-            Task::ReplicaRecover {
-                request
-            } => {
+            Task::ReplicaRecover { request } => {
                 self.handle_replica_recover_task();
+            }
+            Task::LeasePeriodCheck => {
+                let _ = self.handle_lease_period_check();
             }
         }
 
@@ -102,8 +115,8 @@ where
     async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), Fatal<C>> {
         //init and append ballot box for the operation
         let log_term = self.replica_group_agent.get_term();
-        let replica_group = self.replica_group_agent.get_replica_group().await;
-        
+        let replica_group = self.replica_group_agent.get_replica_group().await?;
+
         let log_index_result = self
             .ballot_box
             .initiate_ballot(replica_group, log_term, operation.request, operation.callback)
@@ -124,23 +137,39 @@ where
             // send error
         } else {
             // replicate log entries
-            self.replicator_group.continue_replicate_log(log_index);
+            self.replicator_group.continue_replicate_log()?;
         }
         Ok(())
     }
 
-    /// 检查从副本状态，并移除故障副本
-    async fn handle_lease_period(&mut self) {
-        self.replica_group_agent.
-
+    async fn handle_lease_period_check(&mut self) {
+        let replica_ids = self.replicator_group.get_replicator_ids();
+        if !replica_ids.is_empty() {
+            for replica_id in replica_ids.into_iter() {
+                if !self.replicator_group.is_alive(replica_id) {
+                    tracing::info!("");
+                    let secondary_id = ReplicaId::new(replica_id.group_name(), replica_id.node_id());
+                    if self.replica_group_agent.remove_secondary(secondary_id.clone()) {
+                        // cancel ballot about it
+                        let _ = self.ballot_box.cancel_ballot(secondary_id.clone());
+                        // remove replicator
+                        self.replicator_group.remove_replicator(secondary_id)
+                    }
+                }
+            }
+        }
     }
 
-    pub(crate) async fn replica_recover(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, Fatal<C>> {
+    pub(crate) async fn replica_recover(
+        &self,
+        request: ReplicaRecoverRequest<C>,
+    ) -> Result<ReplicaRecoverResponse, Fatal<C>> {
         // 必要检查
-        let cur_version = self.replica_group_agent.get_version().await;
-        if request.version != cur_version {
+        let replica_group = self.replica_group_agent.get_replica_group().await?;
+        let cur_term = replica_group.term();
+        if request.term != cur_term {
             //ERROR
-            return Ok(ReplicaRecoverResponse::higher_version(cur_version))
+            return Ok(ReplicaRecoverResponse::higher_term(cur_term));
         }
         // 添加 Replicator
         self.replicator_group.add_replicator(request.recover_id, ReplicatorType::Candidate, true).await?;
@@ -151,7 +180,6 @@ where
 
         Ok(ReplicaRecoverResponse::success())
     }
-
 }
 
 pub(crate) enum Task<C>
@@ -160,11 +188,8 @@ where
 {
     Commit { operation: Operation<C> },
 
+    ReplicaRecover { request: ReplicaRecoverRequest<C> },
     LeasePeriodCheck,
-
-    ReplicaRecover {
-        request: ReplicaRecoverRequest<C>
-    }
 }
 
 impl<C> TickFactory for Task<C>
@@ -186,6 +211,9 @@ where
     async fn startup(&mut self) -> Result<(), Fatal<C>> {
         // startup ballot box
         self.ballot_box.startup().await?;
+        // start replicator group
+        self.replicator_group.startup().await?;
+        //
         self.lease_period_timer.turn_on();
         // reconciliation
         self.reconciliation()?;
@@ -193,7 +221,13 @@ where
     }
 
     async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+        //
+        self.lease_period_timer.turn_off();
+        // shutdown ballot box
         self.ballot_box.shutdown().await?;
+        // shutdown replicator group
+        self.replicator_group.shutdown().await?;
+
         Ok(())
     }
 }

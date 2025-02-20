@@ -1,5 +1,4 @@
 use crate::core::ballot::error::BallotError;
-use crate::core::ballot::task::Task;
 use crate::core::ballot::{ballot_box, Ballot};
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
@@ -65,7 +64,7 @@ where
         primary_term: usize,
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
-    ) -> Result<usize, BallotError> {
+    ) -> Result<usize, BallotError<C>> {
         let ballot = Ballot::new_by_replica_group(replica_group);
         let (callback, init_result_sender) = C::oneshot();
         let task = Task::InitiateBallot {
@@ -75,13 +74,19 @@ where
             result_sender,
             init_result_sender,
         };
-        self.submit_task(task)?;
+        self.tx_task.send(task)?;
         callback.await
     }
 
     /// cancel ballot
-    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), ()> {
-        todo!()
+    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), BallotError<C>> {
+        let pending_start_index = self.pending_index.load(Relaxed);
+        let start_log_index = self.last_committed_index.load(Relaxed) + 1;
+        let end_log_index = pending_start_index + self.ballot_queue.len() - 1;
+        if start_log_index <= end_log_index {
+            return self.ballot_by(replica_id, start_log_index, end_log_index)
+        }
+        Ok(())
     }
 
     /// receive the ballots of replicaId, [start_log_index, end_log_index], Include boundary values.
@@ -92,7 +97,7 @@ where
         replica_id: ReplicaId<C>,
         start_log_index: usize,
         end_log_index: usize,
-    ) -> Result<(), BallotError> {
+    ) -> Result<(), BallotError<C>> {
         assert!(start_log_index <= end_log_index);
         let pending_start_index = self.pending_index.load(Relaxed);
         let pending_end_index = pending_start_index + self.ballot_queue.len();
@@ -142,6 +147,7 @@ where
         rx.await
     }
 
+    /// announce commit result and remove ballot queue
     pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
         let announce_result = Task::AnnounceBallots { commit_result };
         self.submit_task(announce_result)?;
@@ -159,15 +165,6 @@ where
     ///
     pub(crate) fn is_caught_up(&self, last_log_index: usize) -> bool {
         last_log_index > self.get_last_committed_index()
-    }
-
-    fn submit_task(&self, task: Task<C>) -> Result<(), Fatal<C>> {
-        if let Some(tx_task) = self.tx_task.as_ref() {
-            tx_task.send(task).map_err(|e| Fatal::Shutdown)?;
-            Ok(())
-        } else {
-            Err(Fatal::Shutdown)
-        }
     }
 
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
@@ -327,7 +324,7 @@ where
         //
         while let Some(ballot_context) = self.ballot_queue.pop_front() {
             if let Some(result_sender) = ballot_context.result_sender {
-                let _ = result_sender.send(Err(PacificaError::Shutdown)).map_err(|_| Fatal::Shutdown);
+                let _ = result_sender.send(Err(PacificaError::Fatal(Fatal::Shutdown)));
             }
         }
         Ok(true)
@@ -360,4 +357,33 @@ where
             }
         }
     }
+}
+
+
+enum Task<C>
+where
+    C: TypeConfig,
+{
+    ///
+    InitiateBallot {
+        ballot: Ballot<C>,
+        primary_term: usize,
+        request: Option<C::Request>,
+        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
+        init_result_sender: OneshotSenderOf<C, Result<usize, BallotError<C>>>,
+    },
+
+    CommitBallot {
+        log_index: usize,
+    },
+
+    AnnounceBallots {
+        commit_result: CommitResult<C>,
+    },
+
+    CaughtUp {
+        replica_id: ReplicaId<C>,
+        last_log_index: usize,
+        callback: OneshotSenderOf<C, Result<bool, CaughtUpError>>,
+    },
 }

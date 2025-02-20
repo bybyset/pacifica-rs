@@ -6,6 +6,8 @@ use crate::pacifica::EncodeError;
 use crate::storage::error::StorageError;
 use crate::TypeConfig;
 
+pub use crate::core::LogManagerError;
+
 /// Fatal is unrecoverable
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum Fatal<C>
@@ -41,7 +43,10 @@ where C: TypeConfig {
 
     MetaError(#[from] MetaError),
 
-    StorageError(#[from] StorageError)
+    StorageError(#[from] StorageError),
+
+    LogManagerError(#[from] LogManagerError<C>)
 
 }
+
 

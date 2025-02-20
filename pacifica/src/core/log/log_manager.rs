@@ -52,19 +52,19 @@ where
         match task {
             Task::AppendLogEntries { log_entries, callback } => {
                 let result = self.handle_append_log_entries(log_entries).await;
-                send_result(callback, result)?;
+                let _ = send_result(callback, result);
             }
             Task::TruncatePrefix { first_log_index_kept } => {
-                self.handle_truncate_prefix(first_log_index_kept).await?;
+                let _ = self.handle_truncate_prefix(first_log_index_kept).await;
             }
             Task::TruncateSuffix { last_log_index_kept } => {
-                self.handle_truncate_suffix(last_log_index_kept).await?;
+                let _ = self.handle_truncate_suffix(last_log_index_kept).await;
             }
             Task::Reset { next_log_index } => {
-                self.handle_reset(next_log_index).await?;
+                let _ = self.handle_reset(next_log_index).await;
             }
             Task::OnSnapshot { snapshot_log_id } => {
-                self.handle_on_snapshot(snapshot_log_id).await?;
+                let _ = self.handle_on_snapshot(snapshot_log_id).await;
             }
         }
 
@@ -233,19 +233,19 @@ where
         Ok(())
     }
 
-    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), LogManagerError<C>> {
+    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), Fatal<C>> {
         self.tx_task.send(Task::TruncateSuffix { last_log_index_kept })?;
         Ok(())
     }
 
-    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), LogManagerError<C>> {
+    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), Fatal<C>> {
         self.tx_task.send(Task::TruncatePrefix { first_log_index_kept })?;
         Ok(())
     }
 
     /// be called after event: snapshot load done or snapshot save done
     /// We will crop the op log
-    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), LogManagerError<C>> {
+    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), Fatal<C>> {
         self.tx_task.send(Task::OnSnapshot { snapshot_log_id })?;
         Ok(())
     }

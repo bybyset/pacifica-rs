@@ -2,19 +2,23 @@ use crate::error::Fatal;
 use crate::{StorageError, TypeConfig};
 
 #[derive(Clone)]
-pub(crate) enum LogManagerError<C>
+pub enum LogManagerError<C>
 where C: TypeConfig {
+
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
+
+    /// not found LogEntry at log_index
     NotFound {
         log_index: usize
     },
-    // 损坏的日志，checksum不一致
+    /// Corrupted LogEntry with inconsistent checksum if log_entry_checksum_enable is true
     CorruptedLogEntry {
         expect: u64,
         actual: u64
     },
-    ConflictLog,
+
+
     #[error(transparent)]
     StorageError(#[from] StorageError),
 

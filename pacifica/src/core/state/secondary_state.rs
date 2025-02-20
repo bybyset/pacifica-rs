@@ -4,7 +4,8 @@ use crate::core::log::{LogManager, LogManagerError};
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
-use crate::error::Fatal;
+use crate::core::CoreNotification;
+use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
@@ -12,7 +13,6 @@ use crate::util::{Leased, RepeatedTimer, TickFactory};
 use crate::{LogEntry, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use crate::core::CoreNotification;
 
 pub(crate) struct SecondaryState<C, FSM>
 where
@@ -47,8 +47,12 @@ where
         let grace_period = Leased::new(C::now(), grace_period_timeout.clone());
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let grace_period_timer = RepeatedTimer::new(grace_period_timeout, tx_task.clone(), false);
-        let append_entries_handler =
-            AppendEntriesHandler::new(log_manager.clone(), fsm_caller.clone(), replica_group_agent.clone());
+        let append_entries_handler = AppendEntriesHandler::new(
+            log_manager.clone(),
+            fsm_caller.clone(),
+            replica_group_agent.clone(),
+            core_notification.clone(),
+        );
 
         Self {
             grace_period,
@@ -94,7 +98,7 @@ where
     pub(crate) async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,
-    ) -> Result<AppendEntriesResponse, Fatal<C>> {
+    ) -> Result<AppendEntriesResponse, PacificaError<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await
     }
 }

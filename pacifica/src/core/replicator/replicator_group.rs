@@ -12,7 +12,7 @@ use crate::error::{Fatal, PacificaError};
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf, TimeoutErrorOf, TimeoutOf};
-use crate::util::send_result;
+use crate::util::{send_result, RepeatedTimer, TickFactory};
 use crate::{LogId, ReplicaClient, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -24,7 +24,6 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    primary_id: ReplicaId<C>,
     replica_client: Arc<C::ReplicaClient>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
@@ -32,7 +31,8 @@ where
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
     core_notification: Arc<CoreNotification<C>>,
-    options: Arc<ReplicaOption>,
+    replica_options: Arc<ReplicaOption>,
+
 
     replicators: HashMap<ReplicaId<C>, ReplicaComponent<C, Replicator<C, FSM>>>,
     task_sender: TaskSender<C, Task<C, FSM>>,
@@ -45,19 +45,17 @@ where
     FSM: StateMachine<C>,
 {
     pub(crate) fn new(
-        primary_id: ReplicaId<C>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
         core_notification: Arc<CoreNotification<C>>,
-        options: Arc<ReplicaOption>,
+        replica_options: Arc<ReplicaOption>,
         replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         ReplicatorGroup {
-            primary_id,
             log_manager,
             fsm_caller,
             snapshot_executor,
@@ -65,8 +63,7 @@ where
             replica_group_agent,
             ballot_box,
             core_notification,
-            options,
-
+            replica_options,
             replicators: HashMap::new(),
             task_sender: TaskSender::new(tx_task),
             rx_task,
@@ -112,9 +109,7 @@ where
         let alive = {
             match replicator {
                 Some(replicator) => {
-                    let last = replicator.last_rpc_response();
-                    let now = C::now();
-                    now - last < self.options.lease_period_timeout()
+                    self.is_alive_replicator(replicator)
                 }
                 None => false,
             }
@@ -134,12 +129,19 @@ where
         result
     }
 
-    pub(crate) fn continue_replicate_log(&self, next_log_index: usize) {
-        todo!()
+    pub(crate) fn continue_replicate_log(&self) -> Result<(), Fatal<C>>{
+        for replicator in self.replicators.values() {
+            replicator.notify_more_log()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn get_primary_id(&self) -> ReplicaId<C> {
-        self.primary_id.clone()
+        self.replica_group_agent.current_id()
+    }
+
+    pub(crate) fn get_replicator_ids(&self) -> Vec<&ReplicaId<C>> {
+        self.replicators.keys().collect()
     }
 
     pub(crate) async fn remove_replicator(&self, target_id: ReplicaId<C>) -> Option<Replicator<C, FSM>> {
@@ -188,7 +190,7 @@ where
         target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
     ) -> ReplicaComponent<C, Replicator<C, FSM>> {
-        let primary_id = self.primary_id.clone();
+        let primary_id = self.replica_group_agent.current_id();
         let replicator = Replicator::new(
             primary_id,
             target_id,
@@ -199,7 +201,7 @@ where
             self.replica_client.clone(),
             self.ballot_box.clone(),
             self.core_notification.clone(),
-            self.options.clone(),
+            self.replica_options.clone(),
             self.replica_group_agent.clone(),
         );
         ReplicaComponent::new(replicator)
@@ -228,7 +230,8 @@ where
             } => {
                 let result = self.handle_add_replicator(target_id, replicator_type).await;
                 let _ = send_result(callback, result);
-            }
+            },
+
         }
     }
 
@@ -253,6 +256,15 @@ where
         }
         Ok(())
     }
+
+    fn is_alive_replicator(&self, replicator: &Replicator<C, FSM>) -> bool {
+        Self::check_is_alive(replicator, self.replica_options.lease_period_timeout())
+    }
+    fn check_is_alive(replicator: &Replicator<C, FSM>, lease_period_timeout: Duration) -> bool {
+        let last = replicator.last_rpc_response();
+        let now = C::now();
+        now - last < lease_period_timeout
+    }
 }
 
 impl<C, FSM> Lifecycle<C> for ReplicatorGroup<C, FSM>
@@ -260,12 +272,13 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
-        Ok(true)
+    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+
+        Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
-        Ok(true)
+    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+        Ok(())
     }
 }
 
@@ -312,4 +325,6 @@ where
         remove_id: ReplicaId<C>,
         callback: ResultSender<C, Option<Replicator<C, FSM>>, Fatal<C>>,
     },
+
 }
+

@@ -26,6 +26,9 @@ pub(crate) use self::lifecycle::Lifecycle;
 pub(crate) use self::task_sender::TaskSender;
 pub(crate) use self::core_notification::CoreNotification;
 
-pub(crate) use self::caught_up::CaughtUpListener;
 pub(crate) use self::caught_up::CaughtUpError;
+
+
+pub use self::log::LogManagerError;
+
 

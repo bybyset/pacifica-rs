@@ -44,6 +44,7 @@ where
     options: Arc<ReplicaOption>,
     replica_client: Arc<C::ReplicaClient>,
 
+    waiting_more_log: bool,
     // initial 1,
     next_log_index: AtomicUsize,
     last_rpc_response: InstantOf<C>,
@@ -88,7 +89,7 @@ where
             ballot_box,
             core_notification,
             options,
-
+            waiting_more_log: false,
             next_log_index: AtomicUsize::new(1), // initial is 1
             last_rpc_response: C::now(),
             caught_up_listener: Mutex::new(None),
@@ -125,9 +126,22 @@ where
         self.task_sender.send(Task::AppendLogEntries)
     }
 
+    pub(crate) fn notify_more_log(&self) -> Result<(), Fatal<C>> {
+        self.task_sender.send(Task::NotifyMoreLog {})
+    }
+
     ///
     pub(crate) fn get_type(&self) -> ReplicatorType {
         self.replicator_type
+    }
+
+    ///
+    pub(crate) fn get_target_id(&self) -> ReplicaId<C> {
+        self.target_id.clone()
+    }
+
+    pub(crate) fn get_next_log_index(&self) -> usize {
+        self.next_log_index.load(Ordering::Relaxed)
     }
 
     pub(crate) fn add_listener(&self, listener: CaughtUpListener<C>) -> bool {
@@ -154,19 +168,24 @@ where
 
             Task::AppendLogEntries => self.handle_append_log_entries().await?,
 
-            Task::InstallSnapshot {} => {}
+            Task::InstallSnapshot {} => {
+                self.handle_install_snapshot().await?;
+            }
+            Task::NotifyMoreLog => {
+
+            }
         }
         Ok(())
     }
 
     async fn handle_block(&mut self, timeout: Duration) -> Result<(), Fatal<C>> {
         C::sleep_until(C::now() + timeout).await;
-        self.send_empty_entries().await?;
+        self.send_empty_entries(true).await?;
         Ok(())
     }
 
     async fn handle_probe(&mut self) -> Result<(), Fatal<C>> {
-        self.send_empty_entries()?;
+        self.send_empty_entries(true)?;
         Ok(())
     }
 
@@ -174,7 +193,7 @@ where
         let timeout = self.options.heartbeat_interval();
         /// other request can also be considered heartbeat. reduce network overload.
         if self.last_rpc_response + timeout < heartbeat_moment {
-            self.send_empty_entries()?;
+            self.send_empty_entries(false)?;
         }
         Ok(())
     }
@@ -189,9 +208,17 @@ where
         Ok(())
     }
 
+    async fn handle_notify_more_log(&mut self) -> Result<(), Fatal<C>> {
+        if self.waiting_more_log {
+            self.waiting_more_log = false;
+            self.send_log_entries().await?;
+        }
+        Ok(())
+    }
+
     /// send empty entries request, it may be triggered by a Probe or a Heartbeat.
     /// install snapshot if not found LogEntry.
-    async fn send_empty_entries(&mut self) -> Result<(), Fatal<C>> {
+    async fn send_empty_entries(&mut self, is_probe: bool) -> Result<(), Fatal<C>> {
         // fill request
         let prev_log_index = self.next_log_index.load(Ordering::Relaxed) - 1;
         let request = self.fill_common_append_entries_request(prev_log_index).await?;
@@ -202,7 +229,10 @@ where
             }
             Some(append_entries) => {
                 // send request
-                self.do_send_append_entries_request(append_entries).await?;
+                let success = self.do_send_append_entries_request(append_entries).await?;
+                if success && is_probe {
+                    self.append_log_entries()?;
+                }
             }
         }
         Ok(())
@@ -218,6 +248,9 @@ where
             }
             Some(mut append_log_request) => {
                 let continue_send = self.fill_append_entries_request(&mut append_log_request).await?;
+                if !continue_send {
+                    self.waiting_more_log();
+                }
                 let success = self.do_send_append_entries_request(append_log_request).await?;
                 if success && continue_send {
                     self.append_log_entries()?;
@@ -305,6 +338,10 @@ where
             };
         }
         Ok(true)
+    }
+
+    fn waiting_more_log(&mut self) {
+        self.waiting_more_log = true
     }
 
     async fn do_send_install_snapshot_request(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), Fatal<C>> {
@@ -515,7 +552,7 @@ where
                 task_msg = self.rx_task.recv().fuse() => {
                     match task_msg {
                         Some(task) => {
-                            self.handle_task(task).await?
+                            self.handle_task(task).await?;
                         }
                         None => {
                             tracing::warn!("received unexpected task message.");
@@ -542,6 +579,8 @@ where
     AppendLogEntries,
 
     InstallSnapshot,
+
+    NotifyMoreLog
 }
 
 impl<C> TickFactory for Task<C>

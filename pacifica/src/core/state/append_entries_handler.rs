@@ -2,11 +2,11 @@ use crate::core::fsm::StateMachineCaller;
 use crate::core::lifecycle::ReplicaComponent;
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
+use crate::core::CoreNotification;
 use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::{LogEntry, StateMachine, TypeConfig};
 use std::sync::Arc;
-use crate::core::CoreNotification;
 
 pub(crate) struct AppendEntriesHandler<C, FSM>
 where
@@ -34,16 +34,15 @@ where
             log_manager,
             fsm_caller,
             replica_group_agent,
-            core_notification
+            core_notification,
         }
     }
     pub(crate) async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, PacificaError<C>> {
-        let replica_group = self.replica_group_agent.get_replica_group().await.map_err(|e| {
-            PacificaError::MetaError(e)
-        })?;
+        let replica_group =
+            self.replica_group_agent.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
         let version = replica_group.version();
         if request.version > version {
             let _ = self.core_notification.higher_version(request.version);
@@ -67,11 +66,16 @@ where
             return Ok(AppendEntriesResponse::success());
         }
         let result = self.do_append_log_entries(request.entries).await;
-        result.map_err(|e| {});
-        Ok(AppendEntriesResponse::success())
+        match result {
+            Err(e) => match e {
+                CheckConflictError::AppendCommitted => Ok(AppendEntriesResponse::conflict_log(last_log_index)),
+                CheckConflictError::LogManagerError(e) => Err(PacificaError::LogManagerError(e)),
+            },
+            Ok(_) => Ok(AppendEntriesResponse::success()),
+        }
     }
 
-    async fn do_append_log_entries(&self, mut log_entries: Vec<LogEntry>) -> Result<(), LogManagerError<C>> {
+    async fn do_append_log_entries(&self, mut log_entries: Vec<LogEntry>) -> Result<(), CheckConflictError<C>> {
         self.check_resolve_conflict(log_entries.as_mut()).await?;
         if !log_entries.is_empty() {
             self.log_manager.append_log_entries(log_entries).await?;
@@ -79,20 +83,16 @@ where
         Ok(())
     }
 
-    async fn check_resolve_conflict(&self, log_entries: &mut Vec<LogEntry>) -> Result<(), LogManagerError<C>> {
+    async fn check_resolve_conflict(&self, log_entries: &mut Vec<LogEntry>) -> Result<(), CheckConflictError<C>> {
         if !log_entries.is_empty() {
             let first = log_entries.first().unwrap();
             let last_log_index = self.log_manager.get_last_log_index();
-            if first.log_id.index > last_log_index + 1 {
-                // discontinuous
-                // 中断的操作日志
-                return Err(LogManagerError::ConflictLog);
-            }
+            assert!(first.log_id.index <= last_log_index + 1);
             let last = log_entries.last().unwrap();
             let committed_index = self.fsm_caller.get_committed_log_index();
             if last.log_id.index <= committed_index {
                 // 追加已提交的日志
-                return Err(LogManagerError::ConflictLog);
+                return Err(CheckConflictError::AppendCommitted);
             }
             if first.log_id.index != last_log_index + 1 {
                 // 遍历寻找冲突日志
@@ -103,12 +103,7 @@ where
                         break;
                     }
                 }
-
-                let conflict = log_entries.iter().find(|log_entry| {
-                    let log_index = log_entry.log_id.index;
-                    let local_term = self.log_manager.get_log_term_at(log_index);
-                    local_term != log_entry.log_id.term
-                });
+                let conflict = self.find_conflict_log_entry(log_entries).await?;
                 if let Some(conflict) = conflict {
                     // 发现冲突日志
                     if conflict.log_id.index <= last_log_index {
@@ -123,13 +118,27 @@ where
         }
         Ok(())
     }
+
+    async fn find_conflict_log_entry(
+        &self,
+        log_entries: &Vec<LogEntry>,
+    ) -> Result<Option<&LogEntry>, LogManagerError<C>> {
+        for log_entry in log_entries {
+            let log_index = log_entry.log_id.index;
+            let local_term = self.log_manager.get_log_term_at(log_index).await?;
+            if local_term != log_entry.log_id.term {
+                return Ok(Some(log_entry));
+            }
+        }
+        Ok(None)
+    }
 }
 
+enum CheckConflictError<C>
+where
+    C: TypeConfig,
+{
+    AppendCommitted,
 
-enum AppendEntriesError {
-
-    Discontinuous {
-        
-    }
-
+    LogManagerError(#[from] LogManagerError<C>),
 }
