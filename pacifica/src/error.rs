@@ -3,10 +3,10 @@ use anyerror::AnyError;
 use thiserror::Error;
 use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
-use crate::storage::error::StorageError;
 use crate::TypeConfig;
 
 pub use crate::core::LogManagerError;
+pub use crate::storage::StorageError;
 
 /// Fatal is unrecoverable
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

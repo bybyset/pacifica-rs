@@ -52,7 +52,7 @@ where
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let recover_timer = RepeatedTimer::new(recover_interval, tx_task.clone(), false);
         let append_entries_handler =
-            AppendEntriesHandler::new(log_manager.clone(), fsm_caller.clone(), replica_group_agent.clone());
+            AppendEntriesHandler::new(log_manager.clone(), fsm_caller.clone(), replica_group_agent.clone(), core_notification.clone());
 
         Self {
             fsm_caller,
@@ -134,11 +134,12 @@ where
     async fn startup(&mut self) -> Result<(), Fatal<C>> {
         self.recover_timer.turn_on();
 
-        Ok(true)
+        Ok(())
     }
 
     async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
-        todo!()
+
+        self.recover_timer.shutdown().await
     }
 }
 

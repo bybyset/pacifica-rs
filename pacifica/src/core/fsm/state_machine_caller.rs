@@ -266,8 +266,7 @@ where
         &mut self,
         snapshot_reader: C::SnapshotStorage::Reader,
     ) -> Result<LogId, StateMachineError<C>> {
-        let meta = snapshot_reader.get_snapshot_meta().await;
-        let snapshot_log_id = meta.get_snapshot_log_id();
+        let snapshot_log_id = snapshot_reader.read_snapshot_log_id();
         let committed_log_id = self.committed_log_id.clone();
         if committed_log_id > snapshot_log_id {
             // error
