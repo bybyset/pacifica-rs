@@ -26,7 +26,7 @@ where
 
     async fn on_load_snapshot(&self, snapshot_reader: &SnapshotReaderOf<C>) -> Result<(), AnyError>;
 
-    async fn on_save_snapshot(&self, snapshot_writer: &mut &SnapshotWriteOf<C>) -> Result<(), AnyError>;
+    async fn on_save_snapshot(&self, snapshot_writer: &mut SnapshotWriteOf<C>) -> Result<(), AnyError>;
 
     async fn on_shutdown(&self);
 

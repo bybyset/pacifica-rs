@@ -13,7 +13,7 @@ use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
 };
-use crate::util::{send_result, RepeatedTimer, TickFactory};
+use crate::util::{send_result, AutoClose, RepeatedTimer, TickFactory};
 use crate::{LogId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
 use futures::TryStreamExt;
 use std::sync::{Arc, Mutex};
@@ -90,6 +90,7 @@ where
             return Ok(self.last_snapshot_log_id.clone());
         }
         let writer = self.snapshot_storage.open_writer().await.map_err(|e| StorageError::open_writer(e))?;
+        let writer = AutoClose::new(writer);
         let snapshot_log_id = self.fsm_caller.on_snapshot_save(writer).await?;
         self.on_snapshot_success(snapshot_log_id.clone()).await?;
         Ok(snapshot_log_id)
@@ -102,7 +103,7 @@ where
             // fsm on snapshot load
             let snapshot_log_id = self
                 .fsm_caller
-                .on_snapshot_load(snapshot_reader)
+                .on_snapshot_load(AutoClose::new(snapshot_reader))
                 .await
                 .map_err(|err| SnapshotError::StateMachineError(err))?;
             //
@@ -146,10 +147,13 @@ where
         self.last_snapshot_log_id.clone()
     }
 
-    pub(crate) async fn open_snapshot_reader(&self) -> Result<Option<SnapshotReaderOf<C>>, SnapshotError<C>> {
+    pub(crate) async fn open_snapshot_reader(&mut self) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, SnapshotError<C>> {
         let snapshot_reader = self.snapshot_storage.open_reader().await.map_err(|e| {
             StorageError::open_reader(e);
         })?;
+        let snapshot_reader = snapshot_reader.map(|reader| {
+            AutoClose::new(reader)
+        });
         Ok(snapshot_reader)
     }
 }

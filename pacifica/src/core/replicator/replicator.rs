@@ -264,13 +264,14 @@ where
         let snapshot_reader = self.snapshot_executor.open_snapshot_reader().await?;
         match snapshot_reader {
             Some(snapshot_reader) => {
-                let snapshot_meta = snapshot_reader.get_snapshot_meta();
-                let reader_id = snapshot_reader.generate_reader_id();
+                let snapshot_log_id = snapshot_reader.read_snapshot_log_id().map_err(|e| {
+                    // TODO  report error
+                })?;
                 let term = self.replica_group_agent.get_term();
                 let version = self.replica_group_agent.get_version();
                 let primary_id = self.primary_id.clone();
                 let install_snapshot_request =
-                    InstallSnapshotRequest::new(primary_id, term, version, snapshot_meta, reader_id);
+                    InstallSnapshotRequest::new(primary_id, term, version, snapshot_log_id, reader_id);
                 self.do_send_install_snapshot_request(install_snapshot_request).await?;
             }
             None => {
@@ -347,7 +348,7 @@ where
     async fn do_send_install_snapshot_request(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), Fatal<C>> {
         let target_id = self.target_id.clone();
         let rpc_option = RpcOption::default();
-        let snapshot_log_index = request.snapshot_meta.get_snapshot_log_id().index;
+        let snapshot_log_index = request.snapshot_log_id.index;
         let rpc_result = self.replica_client.install_snapshot(target_id, request, rpc_option).await;
         self.handle_install_snapshot_result(rpc_result, snapshot_log_index)
     }

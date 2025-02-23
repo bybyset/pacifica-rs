@@ -38,6 +38,7 @@ pub struct FsSnapshotWriter<T: FileMeta> {
     write_path: PathBuf,
     meta_table: SnapshotMetaTable<T>,
     fs_storage: Arc<FsSnapshotStorage<T>>,
+    flushed: bool,
 }
 
 pub trait FileMeta {
@@ -287,6 +288,7 @@ where
             write_path,
             meta_table,
             fs_storage,
+            flushed: false
         };
         Ok(writer)
     }
@@ -299,7 +301,7 @@ where
         self.meta_table.add_file(filename, file_meta)
     }
 
-    pub fn do_close(&mut self) -> Result<(), Error> {
+    pub fn do_flush(&mut self) -> Result<(), Error> {
         let result = self.write_finish();
         // clear temp path
         let _ = remove_dir_if_exists(self.write_path.as_path());
@@ -383,11 +385,12 @@ impl<T> SnapshotReader for FsSnapshotReader<T>
 where
     T: FileMeta,
 {
-    fn read_snapshot_log_id(&self) -> LogId {
-        self.meta_table.log_id.clone()
+    fn read_snapshot_log_id(&self) -> Result<LogId, AnyError> {
+        let log_id = self.meta_table.log_id.clone();
+        Ok(log_id)
     }
 
-    fn generate_reader_id(&self) -> usize {
+    fn generate_reader_id(&self) -> Result<usize, AnyError> {
         todo!()
     }
 }
@@ -397,7 +400,7 @@ where
     T: FileMeta,
 {
     fn close(&mut self) -> Result<(), AnyError> {
-        self.do_close().map_err(|e| AnyError::from(e))
+        Ok(())
     }
 }
 
@@ -405,8 +408,20 @@ impl<T> SnapshotWriter for FsSnapshotWriter<T>
 where
     T: FileMeta,
 {
-    fn write_snapshot_log_id(&mut self, log_id: LogId) {
-        self.meta_table.log_id = log_id
+    fn write_snapshot_log_id(&mut self, log_id: LogId) ->Result<(), AnyError>{
+        self.meta_table.log_id = log_id;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<(), AnyError> {
+        if self.flushed {
+            return Err(AnyError::error("Have been flushed."))
+        }
+        self.flushed = true;
+        self.do_flush().map_err(|e| {
+            AnyError::from(e)
+        })?;
+        Ok(())
     }
 }
 

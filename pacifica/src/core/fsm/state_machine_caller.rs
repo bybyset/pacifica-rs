@@ -14,7 +14,7 @@ use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
-use crate::util::{send_result, Checksum};
+use crate::util::{send_result, AutoClose, Checksum, Closeable};
 use crate::{LogId, StateMachine, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -84,7 +84,7 @@ where
 
     pub(crate) async fn on_snapshot_save(
         &self,
-        snapshot_writer: C::SnapshotStorage::Writer,
+        snapshot_writer: AutoClose<C::SnapshotStorage::Writer>,
     ) -> Result<LogId, StateMachineError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotSave {
@@ -96,7 +96,7 @@ where
 
     pub(crate) async fn on_snapshot_load(
         &self,
-        snapshot_reader: C::SnapshotStorage::Reader,
+        snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
     ) -> Result<LogId, StateMachineError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotLoad {
@@ -264,9 +264,13 @@ where
 
     async fn handle_load_snapshot(
         &mut self,
-        snapshot_reader: C::SnapshotStorage::Reader,
+        snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
     ) -> Result<LogId, StateMachineError<C>> {
-        let snapshot_log_id = snapshot_reader.read_snapshot_log_id();
+        let snapshot_log_id = snapshot_reader.read_snapshot_log_id().map_err(|e| {
+            StateMachineError::SnapshotLoad {
+                source: e
+            }
+        })?;
         let committed_log_id = self.committed_log_id.clone();
         if committed_log_id > snapshot_log_id {
             // error
@@ -277,7 +281,7 @@ where
         }
         let _ = self
             .fsm
-            .on_load_snapshot(&snapshot_reader)
+            .on_load_snapshot(snapshot_reader.as_ref())
             .await
             .map_err(|e| StateMachineError::SnapshotLoad { source: e })?;
 
@@ -288,12 +292,21 @@ where
 
     async fn handle_save_snapshot(
         &self,
-        mut snapshot_writer: C::SnapshotStorage::Writer
+        mut snapshot_writer: AutoClose<C::SnapshotStorage::Writer>
     ) -> Result<LogId, StateMachineError<C>> {
         let snapshot_log_id = self.committed_log_id.clone();
-        snapshot_writer.write_snapshot_log_id(snapshot_log_id.clone());
-        let result = self.fsm.on_save_snapshot(snapshot_writer).await;
+        snapshot_writer.write_snapshot_log_id(snapshot_log_id.clone()).map_err(|e| {
+            StateMachineError::SnapshotSave {
+                source: e
+            }
+        })?;
+        let result = self.fsm.on_save_snapshot(&mut snapshot_writer).await;
         let _ = result.map_err(|e| {
+            StateMachineError::SnapshotSave {
+                source: e
+            }
+        })?;
+        snapshot_writer.flush().map_err(|e| {
             StateMachineError::SnapshotSave {
                 source: e
             }

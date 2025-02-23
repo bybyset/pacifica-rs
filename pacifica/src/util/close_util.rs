@@ -5,7 +5,7 @@ pub trait Closeable {
     fn close(&mut self) -> Result<(), AnyError>;
 }
 
-pub struct AutoCloseable<T>
+pub struct AutoClose<T>
 where
     T: Closeable,
 {
@@ -13,12 +13,12 @@ where
     inner: T,
 }
 
-impl<T> AutoCloseable<T>
+impl<T> AutoClose<T>
 where
     T: Closeable,
 {
-    pub fn new(closeable: T) -> AutoCloseable<T> {
-        AutoCloseable {
+    pub fn new(closeable: T) -> AutoClose<T> {
+        AutoClose {
             closed: false,
             inner: closeable,
         }
@@ -32,7 +32,7 @@ where
 
 }
 
-impl<T> Deref for AutoCloseable<T>
+impl<T> Deref for AutoClose<T>
 where
     T: Closeable,
 {
@@ -43,7 +43,7 @@ where
     }
 }
 
-impl<T> DerefMut for AutoCloseable<T>
+impl<T> DerefMut for AutoClose<T>
 where
     T: Closeable,
 {
@@ -52,7 +52,25 @@ where
     }
 }
 
-impl<T> Closeable for AutoCloseable<T>
+impl<T> AsRef<T> for AutoClose<T>
+where
+    T: Closeable,
+{
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> AsMut<T> for AutoClose<T>
+where
+    T: Closeable,
+{
+    fn as_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+}
+
+impl<T> Closeable for AutoClose<T>
 where
     T: Closeable,
 {
@@ -65,7 +83,7 @@ where
     }
 }
 
-impl<T> Drop for AutoCloseable<T>
+impl<T> Drop for AutoClose<T>
 where
     T: Closeable,
 {

@@ -20,4 +20,4 @@ pub use self::checksum::Checksum;
 pub use self::leased::Leased;
 
 pub use self::close_util::Closeable;
-pub use self::close_util::AutoCloseable;
+pub use self::close_util::AutoClose;
