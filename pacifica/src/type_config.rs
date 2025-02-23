@@ -30,7 +30,7 @@ pub trait TypeConfig {
     type NodeId: NodeId;
 
     type ReplicaClient: ReplicaClient<Self>;
-    type MetaClient: MetaClient;
+    type MetaClient: MetaClient<Self>;
     type LogStorage: LogStorage;
     type SnapshotStorage: SnapshotStorage;
 }

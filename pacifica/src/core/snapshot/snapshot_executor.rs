@@ -14,12 +14,13 @@ use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
 };
 use crate::util::{send_result, AutoClose, RepeatedTimer, TickFactory};
-use crate::{LogId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
+use crate::{LogId, ReplicaId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
 use futures::TryStreamExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tracing_futures::Instrument;
+use crate::rpc::message::InstallSnapshotRequest;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
 where
@@ -76,6 +77,15 @@ where
                 let result = self.do_snapshot_save(0).await;
                 let _ = send_result(callback, result);
             }
+
+            Task::InstallSnapshot {
+                request,
+                callback
+            } => {
+                let result = self.do_snapshot_install(request).await;
+                let _ = send_result(callback, result);
+            }
+
             Task::SnapshotTick => {
                 let _ = self.do_snapshot_save(self.replica_option.snapshot_log_index_margin).await;
             }
@@ -125,6 +135,28 @@ where
         Ok(())
     }
 
+    async fn do_snapshot_install(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), SnapshotError<C>> {
+        // 1. check
+
+        if request.snapshot_log_id <= self.last_snapshot_log_id {
+            // has been installed.
+            return Err();
+        }
+        // 2. downloading snapshot
+        let target_id = request.primary_id.clone();
+        let _ = self.do_snapshot_download(target_id, request.read_id).await?;
+        // 3. load snapshot
+        let log_id = self.do_snapshot_load().await?;
+        assert_eq!(log_id, request.snapshot_log_id);
+        Ok(())
+    }
+
+    async fn do_snapshot_download(&mut self, target_id: ReplicaId<C>, download_id: usize) -> Result<(), SnapshotError<C>> {
+
+        self.snapshot_storage.
+
+    }
+
     pub(crate) async fn load_snapshot(&self) -> Result<LogId, SnapshotError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotLoad { callback })?;
@@ -139,8 +171,16 @@ where
         log_id
     }
 
-    pub(crate) async fn install_snapshot(&self) -> Result<(), SnapshotError<C>> {
-        todo!()
+    pub(crate) async fn install_snapshot(&self, request: InstallSnapshotRequest<C>) -> Result<(), SnapshotError<C>> {
+        let (callback, rx) = C::oneshot();
+        self.tx_task.send(Task::InstallSnapshot {
+            request,
+            callback
+        })?;
+        rx.await?;
+        Ok(())
+
+
     }
 
     pub(crate) fn get_last_snapshot_log_id(&self) -> LogId {

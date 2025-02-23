@@ -10,7 +10,7 @@ use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
 use crate::error::Fatal;
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaClient, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
@@ -20,6 +20,7 @@ mod candidate_state;
 mod primary_state;
 mod secondary_state;
 mod stateless_state;
+mod install_snapshot_handler;
 
 pub(crate) enum CoreState<C, FSM>
 where
@@ -202,6 +203,23 @@ where
                 Err(Fatal::Shutdown)
             }
         }
+    }
+
+    pub(crate) async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) {
+
+        match self {
+            CoreState::Secondary {state} => {
+
+            },
+            CoreState::Candidate {state} => {
+
+            }
+            _ => {
+                tracing::warn!("");
+
+            }
+        }
+
     }
 }
 

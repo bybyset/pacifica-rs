@@ -325,7 +325,8 @@ where
     }
 
     async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, RpcServiceError> {
-        todo!()
+        self.core_state.handle_replica_recover_request()
+
     }
 
     async fn handle_transfer_primary_request(&self, request: TransferPrimaryRequest) -> Result<TransferPrimaryResponse, RpcServiceError> {

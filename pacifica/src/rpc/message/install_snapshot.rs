@@ -1,5 +1,4 @@
 use crate::{LogId, ReplicaId, TypeConfig};
-use crate::storage::SnapshotMeta;
 
 pub struct InstallSnapshotRequest<C>
 where
@@ -30,12 +29,18 @@ where
 pub enum InstallSnapshotResponse {
     Success,
     Failure,
+
+    HigherTerm { term: usize },
 }
 
 impl InstallSnapshotResponse {
 
     pub fn success() -> Self {
         Self::Success
+    }
+
+    pub fn higher_term(term: usize) -> Self {
+        InstallSnapshotResponse::HigherTerm { term }
     }
 
 }
