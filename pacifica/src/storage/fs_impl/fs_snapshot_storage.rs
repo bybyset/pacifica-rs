@@ -1,6 +1,6 @@
 use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::util::Closeable;
-use crate::{LogId, SnapshotStorage};
+use crate::{LogId, ReplicaId, SnapshotStorage, TypeConfig};
 use anyerror::AnyError;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
@@ -10,10 +10,11 @@ use std::io::{Error, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI16, AtomicI32, Ordering};
 use std::sync::Arc;
+use crate::storage::fs_impl::get_file_rpc::GetFileClient;
 
 const SNAPSHOT_PATH_PREFIX: &str = "snapshot_";
 const TEMP_PATH_NAME: &str = "temp";
-const META_FILE_NAME: &str = "_snapshot_meta";
+pub const META_FILE_NAME: &str = "_snapshot_meta";
 
 const MT_CODEC_MAGIC: u8 = 0x34;
 const MT_CODEC_VERSION: u8 = 1;
@@ -22,22 +23,22 @@ const MT_CODEC_HEADER_LEN: usize = 4;
 const MT_CODEC_HEADER: [u8; MT_CODEC_HEADER_LEN] =
     [MT_CODEC_MAGIC, MT_CODEC_VERSION, MT_CODEC_RESERVED, MT_CODEC_RESERVED];
 
-pub struct FsSnapshotStorage<T: FileMeta> {
+pub struct FsSnapshotStorage<C: TypeConfig, T: FileMeta> {
     directory: PathBuf,
     last_snapshot_log_index: usize,
     ref_map: HashMap<usize, AtomicI16>,
 }
 
-pub struct FsSnapshotReader<T: FileMeta> {
+pub struct FsSnapshotReader<C: TypeConfig, T: FileMeta> {
     snapshot_log_index: usize,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<T>>,
+    fs_storage: Arc<FsSnapshotStorage<T, C>>,
 }
 
-pub struct FsSnapshotWriter<T: FileMeta> {
+pub struct FsSnapshotWriter<C: TypeConfig, T: FileMeta> {
     write_path: PathBuf,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<T>>,
+    fs_storage: Arc<FsSnapshotStorage<C, T>>,
     flushed: bool,
 }
 
@@ -127,6 +128,10 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
         file_meta
     }
 
+    fn contains_file(&self, filename: &str) -> bool {
+        self.file_map.contains_key(filename)
+    }
+
     fn save_to_file<P: AsRef<Path>>(&mut self, file_path: P) -> Result<(), Error> {
         let encodes = self.encode();
         let mut save_file = File::create(file_path)?;
@@ -159,11 +164,13 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 }
 
-impl<T> FsSnapshotStorage<T>
+impl<C, T, GTC> FsSnapshotStorage<C, T, GTC>
 where
+    C: TypeConfig,
     T: FileMeta,
+    GTC: GetFileClient<C>
 {
-    pub fn new<P: AsRef<Path>>(directory: P) -> Result<FsSnapshotStorage<T>, Error> {
+    pub fn new<P: AsRef<Path>>(directory: P) -> Result<FsSnapshotStorage<C, T>, Error> {
         let directory = directory.as_ref().to_path_buf();
         // check exists and create dir
         if !directory.exists() {
@@ -271,14 +278,16 @@ where
     }
 }
 
-impl<T> FsSnapshotWriter<T>
+impl<C, T> FsSnapshotWriter<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
+
 {
     pub fn new<P: AsRef<Path>>(
         write_path: P,
-        fs_storage: Arc<FsSnapshotStorage<T>>,
-    ) -> Result<FsSnapshotWriter<T>, Error> {
+        fs_storage: Arc<FsSnapshotStorage<C, T>>,
+    ) -> Result<FsSnapshotWriter<C, T>, Error> {
         // 1. create directory for write
         let write_path = write_path.as_ref().to_path_buf();
         remove_dir_if_exists(write_path.as_path())?;
@@ -337,11 +346,13 @@ where
     }
 }
 
-impl<T> FsSnapshotReader<T>
+impl<C, T> FsSnapshotReader<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
+
 {
-    pub fn new(fs_storage: Arc<FsSnapshotStorage<T>>, log_index: usize) -> Result<FsSnapshotReader<T>, Error> {
+    pub fn new(fs_storage: Arc<FsSnapshotStorage<C, T>>, log_index: usize) -> Result<FsSnapshotReader<C, T>, Error> {
         //
         assert!(log_index > 0);
         let snapshot_path = fs_storage.get_snapshot_path(log_index);
@@ -362,6 +373,14 @@ where
         self.meta_table.filenames()
     }
 
+    pub fn snapshot_dir(&self) -> &Path {
+        self.fs_storage.get_snapshot_path(self.snapshot_log_index)
+    }
+
+    pub fn contains_file(&self, filename: &str) -> bool {
+        self.meta_table.contains_file(filename)
+    }
+
     pub fn file_meta(&self, filename: &str) -> Option<&T> {
         self.meta_table.file_meta(filename)
     }
@@ -371,8 +390,9 @@ where
     }
 }
 
-impl<T> Closeable for FsSnapshotReader<T>
+impl<C, T> Closeable for FsSnapshotReader<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
 {
     fn close(&mut self) -> Result<(), AnyError> {
@@ -381,8 +401,9 @@ where
     }
 }
 
-impl<T> SnapshotReader for FsSnapshotReader<T>
+impl<C, T> SnapshotReader for FsSnapshotReader<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
 {
     fn read_snapshot_log_id(&self) -> Result<LogId, AnyError> {
@@ -395,8 +416,9 @@ where
     }
 }
 
-impl<T> Closeable for FsSnapshotWriter<T>
+impl<C, T> Closeable for FsSnapshotWriter<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
 {
     fn close(&mut self) -> Result<(), AnyError> {
@@ -404,8 +426,9 @@ where
     }
 }
 
-impl<T> SnapshotWriter for FsSnapshotWriter<T>
+impl<C, T> SnapshotWriter for FsSnapshotWriter<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
 {
     fn write_snapshot_log_id(&mut self, log_id: LogId) ->Result<(), AnyError>{
@@ -425,12 +448,13 @@ where
     }
 }
 
-impl<T> SnapshotStorage for FsSnapshotStorage<T>
+impl<C, T> SnapshotStorage<C> for FsSnapshotStorage<C, T>
 where
+    C: TypeConfig,
     T: FileMeta,
 {
-    type Reader = FsSnapshotReader<T>;
-    type Writer = FsSnapshotWriter<T>;
+    type Reader = FsSnapshotReader<C, T>;
+    type Writer = FsSnapshotWriter<C, T>;
 
     async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
         let last_snapshot_log_index = self.last_snapshot_log_index;
@@ -454,8 +478,12 @@ where
         Ok(writer)
     }
 
-    async fn download_snapshot() {
-        todo!()
+    async fn download_snapshot(&self, target_id: ReplicaId<C>, reader_id: usize) ->Result<(), AnyError>{
+        //
+        // 1. download snapshot meta file
+        // 2. download other snapshot file
+
+
     }
 }
 
@@ -466,6 +494,9 @@ fn remove_dir_if_exists<P: AsRef<Path>>(dir: P) -> Result<(), Error> {
     }
     Ok(())
 }
+
+
+
 
 fn write_string(buffer: &mut Vec<u8>, s: &String) {
     let len = s.len();

@@ -2,7 +2,6 @@ mod append_entries;
 mod install_snapshot;
 mod replica_recover;
 mod transfer_primary;
-mod get_file;
 
 pub use append_entries::AppendEntriesRequest;
 pub use append_entries::AppendEntriesResponse;
@@ -17,5 +16,5 @@ pub use replica_recover::ReplicaRecoverResponse;
 pub use transfer_primary::TransferPrimaryRequest;
 pub use transfer_primary::TransferPrimaryResponse;
 
-pub use get_file::GetFileRequest;
-pub use get_file::GetFileResponse;
+pub use crate::storage::fs_impl::get_file_rpc::GetFileRequest;
+pub use crate::storage::fs_impl::get_file_rpc::GetFileResponse;

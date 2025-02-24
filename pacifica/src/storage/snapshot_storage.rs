@@ -1,5 +1,5 @@
 use anyerror::AnyError;
-use crate::{LogId, ReplicaId};
+use crate::{LogId, ReplicaId, TypeConfig};
 use crate::util::Closeable;
 
 pub trait SnapshotReader: Closeable {
@@ -28,14 +28,8 @@ pub trait SnapshotWriter: Closeable {
 
 }
 
-pub trait SnapshotDownloader {
-
-    async fn start(&self) -> Result<(), AnyError>;
-
-}
-
-
-pub trait SnapshotStorage {
+pub trait SnapshotStorage<C>
+where C: TypeConfig {
     type Reader: SnapshotReader;
     type Writer: SnapshotWriter;
 
@@ -48,5 +42,5 @@ pub trait SnapshotStorage {
     /// return AnyError if error
     async fn open_writer(&self) -> Result<Self::Writer, AnyError>;
 
-    async fn download_snapshot(&self) -> Result<(), AnyError>;
+    async fn download_snapshot(&self, target_id: ReplicaId<C>, reader_id: usize) -> Result<(), AnyError>;
 }

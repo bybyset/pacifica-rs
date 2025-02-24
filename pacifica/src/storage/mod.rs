@@ -5,7 +5,7 @@ mod snapshot_meta;
 mod log_writer;
 mod log_reader;
 mod log_entry_codec;
-mod fs_snapshot_storage;
+mod fs_impl;
 
 pub use self::log_storage::LogStorage;
 pub use self::log_writer::LogWriter;
@@ -22,10 +22,6 @@ pub use self::snapshot_meta::SnapshotMeta;
 pub use self::error::StorageError;
 
 
-pub use self::fs_snapshot_storage::FsSnapshotStorage;
-pub use self::fs_snapshot_storage::FsSnapshotReader;
-pub use self::fs_snapshot_storage::FsSnapshotWriter;
-pub use self::fs_snapshot_storage::FileMeta;
 
 
 
