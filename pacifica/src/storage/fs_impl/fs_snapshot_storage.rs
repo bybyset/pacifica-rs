@@ -1,3 +1,5 @@
+use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
+use crate::storage::fs_impl::get_file_rpc::GetFileClient;
 use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::util::Closeable;
 use crate::{LogId, ReplicaId, SnapshotStorage, TypeConfig};
@@ -7,13 +9,15 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Write};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI16, AtomicI32, Ordering};
 use std::sync::Arc;
-use crate::storage::fs_impl::get_file_rpc::GetFileClient;
+use crate::storage::fs_impl::file_service::{FileReader, FileService};
 
 const SNAPSHOT_PATH_PREFIX: &str = "snapshot_";
-const TEMP_PATH_NAME: &str = "temp";
+const WRITE_TEMP_PATH_NAME: &str = "write_temp";
+const DOWNLOAD_TEMP_PATH_NAME: &str = "download_temp";
 pub const META_FILE_NAME: &str = "_snapshot_meta";
 
 const MT_CODEC_MAGIC: u8 = 0x34;
@@ -23,26 +27,45 @@ const MT_CODEC_HEADER_LEN: usize = 4;
 const MT_CODEC_HEADER: [u8; MT_CODEC_HEADER_LEN] =
     [MT_CODEC_MAGIC, MT_CODEC_VERSION, MT_CODEC_RESERVED, MT_CODEC_RESERVED];
 
-pub struct FsSnapshotStorage<C: TypeConfig, T: FileMeta> {
+pub struct FsSnapshotStorage<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
     directory: PathBuf,
     last_snapshot_log_index: usize,
     ref_map: HashMap<usize, AtomicI16>,
+    client: Arc<GFC>,
+    file_service: Arc<FileService<C, T, GFC>>
 }
 
-pub struct FsSnapshotReader<C: TypeConfig, T: FileMeta> {
+pub struct FsSnapshotReader<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
     snapshot_log_index: usize,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<T, C>>,
+    fs_storage: Arc<FsSnapshotStorage<T, C, GFC>>,
+    file_service: Arc<FileService<C, T, GFC>>,
+    reader_id: Option<usize>
 }
 
-pub struct FsSnapshotWriter<C: TypeConfig, T: FileMeta> {
+pub struct FsSnapshotWriter<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
     write_path: PathBuf,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<C, T>>,
+    fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
     flushed: bool,
 }
 
-pub trait FileMeta {
+pub trait FileMeta: PartialEq + Clone {
     fn encode(&self) -> Vec<u8>;
 
     fn decode(bytes: Vec<u8>) -> Self;
@@ -55,6 +78,20 @@ struct SnapshotMetaTable<T: FileMeta> {
 
 pub struct DefaultFileMeta {
     pub check_sum: u64,
+}
+
+impl PartialEq for DefaultFileMeta {
+    fn eq(&self, other: &Self) -> bool {
+        self.check_sum == other.check_sum
+    }
+}
+
+impl Clone for DefaultFileMeta {
+    fn clone(&self) -> Self {
+        DefaultFileMeta {
+            check_sum: self.check_sum,
+        }
+    }
 }
 
 impl FileMeta for DefaultFileMeta {
@@ -79,6 +116,10 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 
     fn from_file<P: AsRef<Path>>(meta_file: P) -> Result<SnapshotMetaTable<T>, Error> {
+        let meta_file_path = meta_file.as_ref();
+        if !meta_file_path.exists() || !meta_file_path.is_file() {
+            return Ok(SnapshotMetaTable::new_empty());
+        }
         let mut meta_file = File::open(meta_file.as_ref())?;
         // 1. header
         let mut header = vec![0u8; MT_CODEC_HEADER_LEN];
@@ -164,13 +205,13 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 }
 
-impl<C, T, GTC> FsSnapshotStorage<C, T, GTC>
+impl<C, T, GFC> FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GTC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
-    pub fn new<P: AsRef<Path>>(directory: P) -> Result<FsSnapshotStorage<C, T>, Error> {
+    pub fn new<P: AsRef<Path>>(directory: P, client: GFC) -> Result<FsSnapshotStorage<C, T, GFC>, Error> {
         let directory = directory.as_ref().to_path_buf();
         // check exists and create dir
         if !directory.exists() {
@@ -204,10 +245,13 @@ where
 
         let last_snapshot_log_index = snapshot_log_index_list.iter().max();
         let last_snapshot_log_index = last_snapshot_log_index.unwrap_or(&0).clone();
+        let file_service = FileService::new();
         let mut fs_storage = FsSnapshotStorage {
             directory,
             last_snapshot_log_index,
             ref_map: HashMap::new(),
+            client: Arc::new(client),
+            file_service: Arc::new(file_service)
         };
         // inc last_snapshot_log_index
         if last_snapshot_log_index > 0 {
@@ -238,8 +282,13 @@ where
         self.last_snapshot_log_index
     }
 
-    fn get_temp_path(&self) -> &Path {
-        let temp_path = PathBuf::from(self.directory()).join(TEMP_PATH_NAME);
+    fn get_write_temp_path(&self) -> &Path {
+        let temp_path = PathBuf::from(self.directory()).join(WRITE_TEMP_PATH_NAME);
+        temp_path.as_path()
+    }
+
+    fn get_download_temp_path(&self) -> &Path {
+        let temp_path = PathBuf::from(self.directory()).join(DOWNLOAD_TEMP_PATH_NAME);
         temp_path.as_path()
     }
 
@@ -278,28 +327,37 @@ where
     }
 }
 
-impl<C, T> FsSnapshotWriter<C, T>
+impl<C, T, GFC> FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-
+    GFC: GetFileClient<C>
 {
     pub fn new<P: AsRef<Path>>(
         write_path: P,
-        fs_storage: Arc<FsSnapshotStorage<C, T>>,
-    ) -> Result<FsSnapshotWriter<C, T>, Error> {
+        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        for_empty: bool,
+    ) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
         // 1. create directory for write
         let write_path = write_path.as_ref().to_path_buf();
-        remove_dir_if_exists(write_path.as_path())?;
+        if for_empty {
+            remove_dir_if_exists(write_path.as_path())?;
+        }
         // 2. meta table
-        let meta_table = SnapshotMetaTable::new_empty();
+        let meta_file_path = PathBuf::from(write_path.as_path()).join(META_FILE_NAME).as_path();
+        let meta_table = SnapshotMetaTable::from_file(meta_file_path)?;
         let writer = FsSnapshotWriter {
             write_path,
             meta_table,
             fs_storage,
-            flushed: false
+            flushed: false,
         };
         Ok(writer)
+    }
+
+    pub fn open(fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>, for_empty: bool) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
+        let write_temp_path = fs_storage.get_write_temp_path();
+        Self::new(write_temp_path, fs_storage, for_empty)
     }
 
     pub fn add_file(&mut self, filename: String) -> Option<T> {
@@ -330,41 +388,55 @@ where
         // 1. save snapshot meta table to META_FILE
         let meta_file_path = PathBuf::from(self.write_path.as_path()).join(META_FILE_NAME);
         self.meta_table.save_to_file(meta_file_path.as_path())?;
-        // 2. atomic move to snapshot path
+
+        // 2. clear non-snapshot files
+        let write_temp_dir = fs::read_dir(self.write_path.as_path())?;
+        write_temp_dir
+            .filter_map(Result::ok)
+            .filter(|e| e.path().is_file())
+            .filter(|item| {
+                let path = item.path();
+                let need_remove = path
+                    .file_name()
+                    .and_then(|os_filename| os_filename.to_str())
+                    .map(|filename| !META_FILE_NAME.eq(filename) && !self.meta_table.contains_file(filename))
+                    .unwrap_or(false);
+                need_remove
+            })
+            .for_each(|file| {
+                let _ = fs::remove_file(file.path());
+            });
+
+        // 3. atomic move to snapshot path
         let snapshot_path = self.fs_storage.get_snapshot_path(snapshot_log_index);
-        // 2.1 check snapshot_path exist , otherwise destroy it.
-        remove_dir_if_exists(snapshot_path)?;
-        assert!(self.write_path.is_dir());
-        // 2.2 rename
-        fs::rename(self.write_path.as_path(), snapshot_path)?;
-        // 2.3 sync
-        let snapshot_dir = File::open(snapshot_path)?;
-        snapshot_dir.sync_all()?;
-        // 3. on new snapshot
+        atomic_move_dir(self.write_path.as_path(), snapshot_path)?;
+        // 4. on new snapshot
         self.fs_storage.on_new_snapshot(snapshot_log_index);
         Ok(())
     }
 }
 
-impl<C, T> FsSnapshotReader<C, T>
+impl<C, T, GFC> FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-
+    GFC: GetFileClient<C>
 {
-    pub fn new(fs_storage: Arc<FsSnapshotStorage<C, T>>, log_index: usize) -> Result<FsSnapshotReader<C, T>, Error> {
+    pub fn new(fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>, log_index: usize) -> Result<FsSnapshotReader<C, T, GFC>, Error> {
         //
         assert!(log_index > 0);
         let snapshot_path = fs_storage.get_snapshot_path(log_index);
         if !snapshot_path.exists() || !snapshot_path.is_dir() {
             return Err(Error::new(ErrorKind::NotFound, "snapshot dir not exists."));
         }
+        let file_service = fs_storage.file_service.clone();
         let meta_file_path = PathBuf::from(snapshot_path).join(META_FILE_NAME);
         let meta_table = SnapshotMetaTable::from_file(meta_file_path.as_path())?;
         let reader = FsSnapshotReader {
             snapshot_log_index: log_index,
             meta_table,
             fs_storage,
+            file_service
         };
         Ok(reader)
     }
@@ -386,14 +458,22 @@ where
     }
 
     pub fn do_close(&mut self) {
+        let reader_id = self.reader_id.take();
+        match reader_id {
+            Some(reader_id) => {
+                self.file_service.unregister_file_reader(reader_id);
+            }
+            None => {}
+        }
         self.fs_storage.dec_ref(self.snapshot_log_index);
     }
 }
 
-impl<C, T> Closeable for FsSnapshotReader<C, T>
+impl<C, T, GFC> Closeable for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>
 {
     fn close(&mut self) -> Result<(), AnyError> {
         self.do_close();
@@ -401,60 +481,67 @@ where
     }
 }
 
-impl<C, T> SnapshotReader for FsSnapshotReader<C, T>
+impl<C, T, GFC> SnapshotReader for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>
 {
     fn read_snapshot_log_id(&self) -> Result<LogId, AnyError> {
         let log_id = self.meta_table.log_id.clone();
         Ok(log_id)
     }
 
-    fn generate_reader_id(&self) -> Result<usize, AnyError> {
-        todo!()
+    fn generate_reader_id(&mut self) -> Result<usize, AnyError> {
+        let reader_id = self.reader_id.get_or_insert_with(|| {
+            let file_reader = FileReader::new(Arc::new(Self));
+            let reader_id = self.file_service.register_file_reader(file_reader);
+            reader_id
+        });
+        Ok(*reader_id)
     }
 }
 
-impl<C, T> Closeable for FsSnapshotWriter<C, T>
+impl<C, T, GFC> Closeable for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>
 {
     fn close(&mut self) -> Result<(), AnyError> {
         Ok(())
     }
 }
 
-impl<C, T> SnapshotWriter for FsSnapshotWriter<C, T>
+impl<C, T, GFC> SnapshotWriter for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>
 {
-    fn write_snapshot_log_id(&mut self, log_id: LogId) ->Result<(), AnyError>{
+    fn write_snapshot_log_id(&mut self, log_id: LogId) -> Result<(), AnyError> {
         self.meta_table.log_id = log_id;
         Ok(())
     }
 
     fn flush(&mut self) -> Result<(), AnyError> {
         if self.flushed {
-            return Err(AnyError::error("Have been flushed."))
+            return Err(AnyError::error("Have been flushed."));
         }
         self.flushed = true;
-        self.do_flush().map_err(|e| {
-            AnyError::from(e)
-        })?;
+        self.do_flush().map_err(|e| AnyError::from(e))?;
         Ok(())
     }
 }
 
-impl<C, T> SnapshotStorage<C> for FsSnapshotStorage<C, T>
+impl<C, T, GFC> SnapshotStorage<C> for FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>,
 {
-    type Reader = FsSnapshotReader<C, T>;
-    type Writer = FsSnapshotWriter<C, T>;
+    type Reader = FsSnapshotReader<C, T, GFC>;
+    type Writer = FsSnapshotWriter<C, T, GFC>;
 
     async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
         let last_snapshot_log_index = self.last_snapshot_log_index;
@@ -473,17 +560,39 @@ where
     }
 
     async fn open_writer(&self) -> Result<Self::Writer, AnyError> {
-        let writ_path = self.get_temp_path();
-        let writer = FsSnapshotWriter::new(writ_path, Arc::new(Self)).map_err(|e| AnyError::from(e))?;
+        let writ_path = self.get_write_temp_path();
+        let writer = FsSnapshotWriter::new(writ_path, Arc::new(Self), true).map_err(|e| AnyError::from(e))?;
         Ok(writer)
     }
 
-    async fn download_snapshot(&self, target_id: ReplicaId<C>, reader_id: usize) ->Result<(), AnyError>{
-        //
+    async fn download_snapshot(&mut self, target_id: ReplicaId<C>, reader_id: usize) -> Result<(), AnyError> {
+        let download_temp_path = self.get_download_temp_path();
+        if !download_temp_path.exists() {
+            fs::create_dir(download_temp_path).map_err(|e| AnyError::from(e))?;
+        }
+        // create FileDownloader
+        let option = DownloadOption::default();
+        let mut file_downloader = FileDownloader::new(self.client.clone(), target_id, reader_id, option);
         // 1. download snapshot meta file
-        // 2. download other snapshot file
+        let meta_file_path = PathBuf::from(download_temp_path).join(META_FILE_NAME).as_path();
+        file_downloader.download_file(META_FILE_NAME, meta_file_path).await.map_err(|e| AnyError::from(e))?;
+        // 2. load snapshot meta table from meta_file_path
+        let remote_meta_table = SnapshotMetaTable::from_file(meta_file_path).map_err(|e| AnyError::from(e))?;
 
-
+        // 3. download other snapshot file
+        let mut snapshot_writer = FsSnapshotWriter::open(Arc::new(Self), true).map_err(|e| AnyError::from(e))?;
+        let snapshot_file_names = remote_meta_table.filenames();
+        for filename in snapshot_file_names.into_iter() {
+            if !check_is_same(filename.as_str(), &snapshot_writer.meta_table, &remote_meta_table) {
+                let file_path = PathBuf::from(download_temp_path).join(filename.as_str()).as_path();
+                file_downloader.download_file(filename.as_str(), file_path).await.map_err(|e| AnyError::from(e))?;
+                let file_meta = remote_meta_table.file_meta(filename.as_str());
+                let file_meta: Option<T> = file_meta.and_then(|e| e.cloned());
+                snapshot_writer.add_file_with_meta(filename, file_meta);
+            }
+        }
+        snapshot_writer.flush()?;
+        Ok(())
     }
 }
 
@@ -494,9 +603,6 @@ fn remove_dir_if_exists<P: AsRef<Path>>(dir: P) -> Result<(), Error> {
     }
     Ok(())
 }
-
-
-
 
 fn write_string(buffer: &mut Vec<u8>, s: &String) {
     let len = s.len();
@@ -538,4 +644,33 @@ fn read_file_meta<T: FileMeta>(meta_file: &mut File) -> Result<Option<T>, Error>
         return Ok(Some(file_meta));
     }
     Ok(None)
+}
+
+fn atomic_move_dir<P: AsRef<Path>>(src_dir: P, dest_dir: P) -> Result<(), Error> {
+    // 2.1 check dest_dir exist , otherwise destroy it.
+    remove_dir_if_exists(dest_dir.as_ref())?;
+    assert!(src_dir.is_dir());
+    // 2.2 rename
+    fs::rename(src_dir, dest_dir.as_ref())?;
+    // 2.3 sync
+    let snapshot_dir = File::open(dest_dir)?;
+    snapshot_dir.sync_all()?;
+}
+
+fn check_is_same<T: FileMeta>(
+    filename: &str,
+    meta_table1: &SnapshotMetaTable<T>,
+    meta_table2: &SnapshotMetaTable<T>,
+) -> bool {
+    if meta_table1.contains_file(filename) && meta_table2.contains_file(filename) {
+        let meta1 = meta_table1.file_meta(filename);
+        let meta2 = meta_table2.file_meta(filename);
+        match (meta1, meta2) {
+            (Some(m1), Some(m2)) => m1 == m2,
+            (None, None) => true,
+            _ => false,
+        }
+    } else {
+        false
+    }
 }

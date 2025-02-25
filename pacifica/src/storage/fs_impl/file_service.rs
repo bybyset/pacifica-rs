@@ -1,6 +1,6 @@
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::RpcServiceError;
-use crate::storage::fs_impl::get_file_rpc::GetFileService;
+use crate::storage::fs_impl::get_file_rpc::{GetFileClient, GetFileService};
 use crate::storage::fs_impl::{FileMeta, FsSnapshotReader};
 use crate::TypeConfig;
 use std::cmp::min;
@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::{Error, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
-
+use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::storage::fs_impl::fs_snapshot_storage::META_FILE_NAME;
 
 pub enum ReadFileError {
@@ -28,20 +28,22 @@ impl ReadFileError {
     }
 }
 
-pub struct FileReader<C, T>
+pub struct FileReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>,
 {
-    fs_snapshot_reader: Arc<FsSnapshotReader<C, T>>,
+    fs_snapshot_reader: Arc<FsSnapshotReader<C, T, GFC>>,
 }
 
-impl<C, T> FileReader<C, T>
+impl<C, T, GFC> FileReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>,
 {
-    pub fn new(fs_snapshot_reader: Arc<FsSnapshotReader<C, T>>) -> FileReader<C, T> {
+    pub fn new(fs_snapshot_reader: Arc<FsSnapshotReader<C, T, GFC>>) -> FileReader<C, T, GFC> {
         FileReader { fs_snapshot_reader }
     }
 
@@ -81,14 +83,46 @@ where
     }
 }
 
-pub struct FileService<C, T> {
-    reader_map: HashMap<usize, FileReader<C, T>>,
-}
-
-impl<C, T> GetFileService<C> for FileService<C, T>
+pub struct FileService<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    reader_id_allocator : AtomicUsize,
+    reader_map: HashMap<usize, FileReader<C, T, GFC>>,
+}
+impl<C, T, GFC> FileService<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    pub fn new() -> Self<C, T, GFC> {
+
+        FileService {
+            reader_id_allocator: AtomicUsize::new(0),
+            reader_map: HashMap::new(),
+        }
+    }
+
+    pub fn register_file_reader(&mut self, file_reader: FileReader<C, T, GFC>) -> usize {
+        let reader_id = self.reader_id_allocator.fetch_add(1, Ordering::Relaxed);
+        self.reader_map.insert(reader_id, file_reader);
+        reader_id
+    }
+
+    pub fn unregister_file_reader(&mut self, read_id: usize) -> bool {
+        let removed = self.reader_map.remove(&read_id);
+        removed.is_some()
+    }
+}
+
+impl<C, T, GFC> GetFileService<C> for FileService<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
 {
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
         let reader_id = request.reader_id;

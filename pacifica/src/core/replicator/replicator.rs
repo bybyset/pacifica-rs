@@ -267,6 +267,9 @@ where
                 let snapshot_log_id = snapshot_reader.read_snapshot_log_id().map_err(|e| {
                     // TODO  report error
                 })?;
+
+                let reader_id = snapshot_reader.generate_reader_id();
+
                 let term = self.replica_group_agent.get_term();
                 let version = self.replica_group_agent.get_version();
                 let primary_id = self.primary_id.clone();
