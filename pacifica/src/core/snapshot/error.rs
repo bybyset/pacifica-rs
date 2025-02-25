@@ -1,3 +1,4 @@
+use anyerror::AnyError;
 use crate::core::fsm::StateMachineError;
 use crate::core::log::LogManagerError;
 use crate::{StorageError, TypeConfig};
@@ -16,5 +17,9 @@ where C: TypeConfig {
 
     #[error(transparent)]
     StorageError(#[from] StorageError),
+
+    DownloadError {
+        source: AnyError
+    }
 
 }

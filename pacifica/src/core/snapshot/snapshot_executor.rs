@@ -9,7 +9,7 @@ use crate::core::Command;
 use crate::core::ResultSender;
 use crate::error::Fatal;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
-use crate::storage::SnapshotReader;
+use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotReader};
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
 };
@@ -21,6 +21,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tracing_futures::Instrument;
 use crate::rpc::message::InstallSnapshotRequest;
+use crate::rpc::RpcServiceError;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
 where
@@ -152,9 +153,12 @@ where
     }
 
     async fn do_snapshot_download(&mut self, target_id: ReplicaId<C>, download_id: usize) -> Result<(), SnapshotError<C>> {
-
-        self.snapshot_storage.
-
+        self.snapshot_storage.download_snapshot(target_id, download_id).await.map_err(|e| {
+            SnapshotError::DownloadError {
+                source: e
+            }
+        })?;
+        Ok(())
     }
 
     pub(crate) async fn load_snapshot(&self) -> Result<LogId, SnapshotError<C>> {
@@ -258,5 +262,15 @@ where
 
     fn new_tick() -> Self::Tick {
         Task::SnapshotTick
+    }
+}
+
+impl<C, FSM > GetFileService<C> for SnapshotExecutor<C, FSM> where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    #[inline]
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
+        self.snapshot_storage.handle_get_file_request(request).await
     }
 }

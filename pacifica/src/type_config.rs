@@ -32,7 +32,7 @@ pub trait TypeConfig {
     type ReplicaClient: ReplicaClient<Self>;
     type MetaClient: MetaClient<Self>;
     type LogStorage: LogStorage;
-    type SnapshotStorage: SnapshotStorage;
+    type SnapshotStorage: SnapshotStorage<Self>;
 }
 
 pub mod alias {

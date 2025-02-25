@@ -1,17 +1,26 @@
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::rpc::message::AppendEntriesRequest;
+use crate::rpc::message::AppendEntriesResponse;
+use crate::rpc::message::InstallSnapshotRequest;
+use crate::rpc::message::InstallSnapshotResponse;
+use crate::rpc::message::ReplicaRecoverRequest;
+use crate::rpc::message::ReplicaRecoverResponse;
+use crate::rpc::message::TransferPrimaryRequest;
+use crate::rpc::message::TransferPrimaryResponse;
+
+
 use crate::rpc::RpcClientError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
-
+use crate::storage::GetFileClient;
 
 pub trait ConnectionClient<C>
 where C: TypeConfig {
 
-    fn connect(&self, replica_id: &ReplicaId<C>) -> bool {
+    fn connect(&self, _replica_id: &ReplicaId<C>) -> bool {
         true
     }
 
-    fn disconnect(&self, replica_id: &ReplicaId<C>) -> bool {
+    fn disconnect(&self, _replica_id: &ReplicaId<C>) -> bool {
         true
     }
 
@@ -25,7 +34,7 @@ where C: TypeConfig {
         true
     }
 
-    fn is_connected(&self, replica_id: &ReplicaId<C>) -> bool {
+    fn is_connected(&self, _replica_id: &ReplicaId<C>) -> bool {
         true
     }
 
@@ -33,7 +42,7 @@ where C: TypeConfig {
 }
 
 
-pub trait ReplicaClient<C>: ConnectionClient<C>
+pub trait ReplicaClient<C>: GetFileClient<C> + ConnectionClient<C>
 where
     C: TypeConfig,
 {
@@ -64,10 +73,4 @@ where
         rpc_option: RpcOption,
     ) -> Result<TransferPrimaryResponse, RpcClientError>;
 
-    async fn get_file(
-        &self,
-        target_id: ReplicaId<C>,
-        request: GetFileRequest,
-        rpc_option: RpcOption,
-    ) -> Result<GetFileResponse, RpcClientError>;
 }

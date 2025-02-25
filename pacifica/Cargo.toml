@@ -33,7 +33,8 @@ log = "0.4.22"
 
 [features]
 
-default = ["tokio-runtime"]
+default = ["tokio-runtime", "snapshot-storage-fs"]
 
 # Enable the default Tokio runtime
-tokio-runtime = ["tokio"]
+tokio-runtime = ["dep:tokio"]
+snapshot-storage-fs = []

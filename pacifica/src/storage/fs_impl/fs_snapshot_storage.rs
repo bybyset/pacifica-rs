@@ -1,6 +1,8 @@
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
-use crate::storage::fs_impl::get_file_rpc::GetFileClient;
-use crate::storage::{SnapshotReader, SnapshotWriter};
+use crate::storage::fs_impl::file_service::{FileReader, FileService};
+use crate::storage::get_file_rpc::GetFileClient;
+use crate::storage::fs_impl::GetFileService;
+use crate::storage::{GetFileService, SnapshotReader, SnapshotWriter};
 use crate::util::Closeable;
 use crate::{LogId, ReplicaId, SnapshotStorage, TypeConfig};
 use anyerror::AnyError;
@@ -13,7 +15,8 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI16, AtomicI32, Ordering};
 use std::sync::Arc;
-use crate::storage::fs_impl::file_service::{FileReader, FileService};
+use crate::rpc::message::{GetFileRequest, GetFileResponse};
+use crate::rpc::RpcServiceError;
 
 const SNAPSHOT_PATH_PREFIX: &str = "snapshot_";
 const WRITE_TEMP_PATH_NAME: &str = "write_temp";
@@ -37,7 +40,7 @@ where
     last_snapshot_log_index: usize,
     ref_map: HashMap<usize, AtomicI16>,
     client: Arc<GFC>,
-    file_service: Arc<FileService<C, T, GFC>>
+    file_service: Arc<FileService<C, T, GFC>>,
 }
 
 pub struct FsSnapshotReader<C, T, GFC>
@@ -50,7 +53,7 @@ where
     meta_table: SnapshotMetaTable<T>,
     fs_storage: Arc<FsSnapshotStorage<T, C, GFC>>,
     file_service: Arc<FileService<C, T, GFC>>,
-    reader_id: Option<usize>
+    reader_id: Option<usize>,
 }
 
 pub struct FsSnapshotWriter<C, T, GFC>
@@ -251,7 +254,7 @@ where
             last_snapshot_log_index,
             ref_map: HashMap::new(),
             client: Arc::new(client),
-            file_service: Arc::new(file_service)
+            file_service: Arc::new(file_service),
         };
         // inc last_snapshot_log_index
         if last_snapshot_log_index > 0 {
@@ -331,7 +334,7 @@ impl<C, T, GFC> FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
     pub fn new<P: AsRef<Path>>(
         write_path: P,
@@ -355,7 +358,10 @@ where
         Ok(writer)
     }
 
-    pub fn open(fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>, for_empty: bool) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
+    pub fn open(
+        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        for_empty: bool,
+    ) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
         let write_temp_path = fs_storage.get_write_temp_path();
         Self::new(write_temp_path, fs_storage, for_empty)
     }
@@ -420,9 +426,12 @@ impl<C, T, GFC> FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
-    pub fn new(fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>, log_index: usize) -> Result<FsSnapshotReader<C, T, GFC>, Error> {
+    pub fn new(
+        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        log_index: usize,
+    ) -> Result<FsSnapshotReader<C, T, GFC>, Error> {
         //
         assert!(log_index > 0);
         let snapshot_path = fs_storage.get_snapshot_path(log_index);
@@ -436,7 +445,8 @@ where
             snapshot_log_index: log_index,
             meta_table,
             fs_storage,
-            file_service
+            file_service,
+            reader_id: None,
         };
         Ok(reader)
     }
@@ -473,7 +483,7 @@ impl<C, T, GFC> Closeable for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
     fn close(&mut self) -> Result<(), AnyError> {
         self.do_close();
@@ -485,7 +495,7 @@ impl<C, T, GFC> SnapshotReader for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
     fn read_snapshot_log_id(&self) -> Result<LogId, AnyError> {
         let log_id = self.meta_table.log_id.clone();
@@ -506,7 +516,7 @@ impl<C, T, GFC> Closeable for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
     fn close(&mut self) -> Result<(), AnyError> {
         Ok(())
@@ -517,7 +527,7 @@ impl<C, T, GFC> SnapshotWriter for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
-    GFC: GetFileClient<C>
+    GFC: GetFileClient<C>,
 {
     fn write_snapshot_log_id(&mut self, log_id: LogId) -> Result<(), AnyError> {
         self.meta_table.log_id = log_id;
@@ -593,6 +603,18 @@ where
         }
         snapshot_writer.flush()?;
         Ok(())
+    }
+}
+
+impl<C, T, GFC> GetFileService<C> for FsSnapshotStorage<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    #[inline]
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
+        self.file_service.handle_get_file_request(request).await
     }
 }
 

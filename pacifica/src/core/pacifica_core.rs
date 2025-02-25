@@ -10,14 +10,22 @@ use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::{CoreNotification, CoreState};
 use crate::error::{Fatal, PacificaError};
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::rpc::message::{
+    AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
+    InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
+    TransferPrimaryResponse,
+};
 use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
+use crate::storage::GetFileService;
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::{send_result, RepeatedTimer};
-use crate::{LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine, TypeConfig};
+use crate::{
+    LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine,
+    TypeConfig,
+};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -69,7 +77,10 @@ where
 
         let (tx_notification, rx_notification) = C::mpsc_unbounded();
         let core_notification = Arc::new(CoreNotification::new(tx_notification));
-        let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(log_storage, replica_option.clone())));
+        let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(
+            log_storage,
+            replica_option.clone(),
+        )));
         let fsm_caller = Arc::new(ReplicaComponent::new(StateMachineCaller::new(
             fsm,
             log_manager.clone(),
@@ -114,18 +125,12 @@ where
             ApiMsg::CommitOperation { operation } => {
                 self.handle_commit(operation);
             }
-            ApiMsg::Recovery {} => {
-
-            }
-            ApiMsg::SaveSnapshot {
-                callback
-            } => {
+            ApiMsg::Recovery {} => {}
+            ApiMsg::SaveSnapshot { callback } => {
                 let result = self.snapshot_executor.snapshot().await;
                 let _ = send_result(callback, result);
             }
-            ApiMsg::TransferPrimary {
-                new_primary
-            } => {
+            ApiMsg::TransferPrimary { new_primary } => {
                 self.handle_transfer_primary(new_primary).await;
             }
         }
@@ -142,7 +147,7 @@ where
             NotificationMsg::HigherTerm { term } => {
                 self.handle_receive_higher_term(term).await?;
             }
-            NotificationMsg::HigherVersion {version} => {
+            NotificationMsg::HigherVersion { version } => {
                 self.handle_receive_higher_version(version).await?;
             }
         }
@@ -170,13 +175,11 @@ where
         Ok(())
     }
 
-
     fn handle_commit(&self, operation: Operation<C>) {
         self.core_state.handle_commit_operation(operation);
     }
 
     async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {}
-
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
         let old_replica_state = self.core_state.get_replica_state();
@@ -212,7 +215,13 @@ where
                 let replica_group_agent = self.replica_group.clone();
                 let replica_client = self.replica_client.clone();
                 let replica_option = self.replica_option.clone();
-                CoreState::new_primary(fsm_caller, log_manager, replica_group_agent, replica_client, replica_option)
+                CoreState::new_primary(
+                    fsm_caller,
+                    log_manager,
+                    replica_group_agent,
+                    replica_client,
+                    replica_option,
+                )
             }
             ReplicaState::Secondary => {
                 let fsm_caller = self.fsm_caller.clone();
@@ -220,7 +229,13 @@ where
                 let replica_group_agent = self.replica_group.clone();
                 let core_notification = self.core_notification.clone();
                 let replica_option = self.replica_option.clone();
-                CoreState::new_secondary(fsm_caller, log_manager, replica_group_agent, core_notification, replica_option)
+                CoreState::new_secondary(
+                    fsm_caller,
+                    log_manager,
+                    replica_group_agent,
+                    core_notification,
+                    replica_option,
+                )
             }
             ReplicaState::Candidate => {
                 let fsm_caller = self.fsm_caller.clone();
@@ -229,7 +244,14 @@ where
                 let replica_client = self.replica_client.clone();
                 let core_notification = self.core_notification.clone();
                 let replica_option = self.replica_option.clone();
-                CoreState::new_candidate(fsm_caller, log_manager, replica_group_agent, replica_client, core_notification, replica_option)
+                CoreState::new_candidate(
+                    fsm_caller,
+                    log_manager,
+                    replica_group_agent,
+                    replica_client,
+                    core_notification,
+                    replica_option,
+                )
             }
             ReplicaState::Stateless => {
                 let replica_group_agent = self.replica_group.clone();
@@ -237,9 +259,7 @@ where
                 let replica_option = self.replica_option.clone();
                 CoreState::new_stateless(replica_group_agent, core_notification, replica_option)
             }
-            ReplicaState::Shutdown => {
-                CoreState::Shutdown
-            }
+            ReplicaState::Shutdown => CoreState::Shutdown,
         }
     }
 }
@@ -314,33 +334,49 @@ where
     }
 }
 
+impl<C, FSM> GetFileService<C> for ReplicaCore<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    #[inline]
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
+        self.snapshot_executor.handle_get_file_request(request).await
+    }
+}
+
 impl<C, FSM> ReplicaService<C> for ReplicaCore<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError> {
+    async fn handle_append_entries_request(
+        &self,
+        request: AppendEntriesRequest<C>,
+    ) -> Result<AppendEntriesResponse, RpcServiceError> {
         let response = self.core_state.handle_append_entries_request(request).await;
         Ok(AppendEntriesResponse {})
     }
 
-    async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, RpcServiceError> {
+    async fn handle_install_snapshot_request(
+        &self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
         self.core_state.handle_replica_recover_request()
-
     }
 
-    async fn handle_transfer_primary_request(&self, request: TransferPrimaryRequest) -> Result<TransferPrimaryResponse, RpcServiceError> {
+    async fn handle_transfer_primary_request(
+        &self,
+        request: TransferPrimaryRequest,
+    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
         todo!()
     }
 
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        todo!()
-    }
-
-    async fn handle_replica_recover_request(&self, request: ReplicaRecoverRequest<C>) -> Result<ReplicaRecoverResponse, RpcServiceError> {
-        let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| {
-            Err(())
-        })?;
+    async fn handle_replica_recover_request(
+        &self,
+        request: ReplicaRecoverRequest<C>,
+    ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
+        let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| Err(()))?;
         Ok(response)
     }
 }

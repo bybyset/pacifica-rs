@@ -4,9 +4,10 @@ use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::rpc::message::{TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::storage::GetFileService;
 use crate::TypeConfig;
 
-pub trait ReplicaService<C>
+pub trait ReplicaService<C>: GetFileService<C>
 where C: TypeConfig {
     /// Secondary or Candidate accepts the request and processes it.
     /// Sent by the Primary, sometimes it can be used as a heartbeat request
@@ -26,10 +27,6 @@ where C: TypeConfig {
         &self,
         request: TransferPrimaryRequest,
     ) -> Result<TransferPrimaryResponse, RpcServiceError>;
-
-    /// In general: Primary accepts the request and processes it.
-    /// for download snapshot file
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError>;
 
     /// Primary accepts the request and processes it.
     /// Sent by the Candidate, Primary sends install snapshots or append entries and

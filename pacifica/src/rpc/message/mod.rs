@@ -16,5 +16,5 @@ pub use replica_recover::ReplicaRecoverResponse;
 pub use transfer_primary::TransferPrimaryRequest;
 pub use transfer_primary::TransferPrimaryResponse;
 
-pub use crate::storage::fs_impl::get_file_rpc::GetFileRequest;
-pub use crate::storage::fs_impl::get_file_rpc::GetFileResponse;
+pub use crate::storage::get_file_rpc::GetFileRequest;
+pub use crate::storage::get_file_rpc::GetFileResponse;

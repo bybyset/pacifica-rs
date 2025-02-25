@@ -55,5 +55,6 @@ where
 {
     /// In general: Primary accepts the request and processes it.
     /// for download snapshot file
+    ///
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError>;
 }

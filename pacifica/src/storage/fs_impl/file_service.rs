@@ -1,6 +1,6 @@
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::RpcServiceError;
-use crate::storage::fs_impl::get_file_rpc::{GetFileClient, GetFileService};
+use crate::storage::get_file_rpc::{GetFileClient, GetFileService};
 use crate::storage::fs_impl::{FileMeta, FsSnapshotReader};
 use crate::TypeConfig;
 use std::cmp::min;

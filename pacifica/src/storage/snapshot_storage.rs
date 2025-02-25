@@ -1,5 +1,6 @@
 use anyerror::AnyError;
 use crate::{LogId, ReplicaId, TypeConfig};
+use crate::storage::GetFileService;
 use crate::util::Closeable;
 
 pub trait SnapshotReader: Closeable {
@@ -28,7 +29,7 @@ pub trait SnapshotWriter: Closeable {
 
 }
 
-pub trait SnapshotStorage<C>
+pub trait SnapshotStorage<C>: GetFileService<C>
 where C: TypeConfig {
     type Reader: SnapshotReader;
     type Writer: SnapshotWriter;

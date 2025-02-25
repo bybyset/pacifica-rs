@@ -1,6 +1,6 @@
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::{RpcClientError, RpcOption};
-use crate::storage::fs_impl::get_file_rpc::GetFileClient;
+use crate::storage::get_file_rpc::GetFileClient;
 use crate::{ReplicaId, TypeConfig};
 use std::fs;
 use std::fs::File;

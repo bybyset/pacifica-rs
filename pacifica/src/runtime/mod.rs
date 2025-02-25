@@ -30,7 +30,7 @@ pub use self::error::RecvError;
 
 
 pub(crate) mod tokio_impl {
-    #![cfg(feature = "tokio-runtime")]
+    #[cfg(feature = "tokio-runtime")]
 
     mod tokio_runtime;
     mod tokio_mpsc;

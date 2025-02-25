@@ -17,6 +17,7 @@ use crate::ReplicaOption;
 use crate::StateMachine;
 use crate::TypeConfig;
 use crate::{LogId, ReplicaClient};
+use crate::storage::GetFileService;
 
 #[derive(Clone)]
 pub struct Replica<C, FSM>
@@ -120,13 +121,26 @@ impl<C, FSM> ReplicaBuilder<C, FSM> {
     }
 }
 
+impl<C, FSM> GetFileService<C> for Replica<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    #[inline]
+    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
+        self.replica_core.handle_get_file_request(request).await
+    }
+}
+
 impl<C, FSM> ReplicaService<C> for Replica<C, FSM>
 where C: TypeConfig, FSM: StateMachine<C>
 {
+    #[inline]
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError> {
         self.replica_core.handle_append_entries_request(request).await
     }
 
+    #[inline]
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
@@ -134,6 +148,7 @@ where C: TypeConfig, FSM: StateMachine<C>
         self.replica_core.handle_install_snapshot_request(request).await
     }
 
+    #[inline]
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest,
@@ -141,10 +156,7 @@ where C: TypeConfig, FSM: StateMachine<C>
         self.handle_transfer_primary_request(request).await
     }
 
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        self.handle_get_file_request(request).await
-    }
-
+    #[inline]
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
