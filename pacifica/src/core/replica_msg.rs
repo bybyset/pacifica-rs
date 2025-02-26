@@ -3,6 +3,7 @@ use crate::rpc::message::{AppendEntriesRequest, GetFileRequest, InstallSnapshotR
 use crate::{LogId, ReplicaId, TypeConfig};
 use crate::core::ResultSender;
 use crate::core::snapshot::SnapshotError;
+use crate::error::PacificaError;
 
 pub(crate) enum ApiMsg<C>
 where
@@ -17,7 +18,8 @@ where
     },
 
     TransferPrimary {
-        new_primary: ReplicaId<C>
+        new_primary: ReplicaId<C>,
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 
     Recovery {

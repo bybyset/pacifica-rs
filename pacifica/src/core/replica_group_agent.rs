@@ -173,6 +173,12 @@ where
         self.get_state(self.current_id.clone()).await
     }
 
+    pub(crate) async fn is_secondary(&self, replica_id: ReplicaId<C>) -> Result<bool, MetaError> {
+        let replica_group = self.get_replica_group().await?;
+        let result = replica_group.is_secondary(replica_id);
+        Ok(result)
+    }
+
     pub(crate) async fn get_state(&self, replica_id: ReplicaId<C>) -> ReplicaState {
         let replica_group = self.get_replica_group().await;
         if let Ok(replica_group) = replica_group {
@@ -195,20 +201,11 @@ where
     }
 
     /// 选举自己做为新的主副本
-    pub(crate) async fn elect_self(&self) -> bool {
+    pub(crate) async fn elect_self(&self) -> Result<(), MetaError> {
         let (tx, rx) = C::oneshot();
         let _ = self.tx_task.send(Task::ElectSelf { callback: tx });
         let result = rx.await;
-        match result {
-            Ok(_) => {
-                tracing::info!("success to elect self");
-                true
-            }
-            Err(e) => {
-                tracing::error!("failed to elect self.", e);
-                false
-            }
-        }
+        result
     }
 
     pub(crate) async fn remove_secondary(&self, removed: ReplicaId<C>) -> bool {

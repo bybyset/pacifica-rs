@@ -4,15 +4,16 @@ use crate::core::log::{LogManager, LogManagerError};
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
-use crate::core::CoreNotification;
+use crate::core::{CoreNotification, ResultSender, TaskSender};
 use crate::error::{Fatal, PacificaError};
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
-use crate::util::{Leased, RepeatedTimer, TickFactory};
+use crate::util::{send_result, Leased, RepeatedTimer, TickFactory};
 use crate::{LogEntry, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use crate::config_cluster::MetaError;
 
 pub(crate) struct SecondaryState<C, FSM>
 where
@@ -27,7 +28,7 @@ where
     append_entries_handler: AppendEntriesHandler<C, FSM>,
     core_notification: Arc<CoreNotification<C>>,
 
-    tx_task: MpscUnboundedSenderOf<C, Task<C>>,
+    tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
@@ -62,7 +63,7 @@ where
             replica_group_agent,
             append_entries_handler,
             core_notification,
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
             rx_task,
         }
     }
@@ -74,10 +75,16 @@ where
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
             Task::GracePeriodCheck => {
-                self.check_grace_period();
+                self.check_grace_period()?;
             }
             Task::AppendEntries { request } => {
                 self.handle_append_entries_request(request).await?;
+            }
+            Task::ElectSelf {
+                callback
+            } => {
+                let result = self.handle_elect_self();
+                let _ = send_result(callback, result);
             }
         }
 
@@ -87,12 +94,31 @@ where
     fn check_grace_period(&self) -> Result<(), Fatal<C>> {
         if self.grace_period.is_expired(C::now()) {
             // 检测到主副本故障，竞争推选自己做为新的主副本
-            if self.replica_group_agent.elect_self() {
-                // 通知ReplicaCore状态变更
-                self.core_notification.core_state_change()?;
+            let result = self.handle_elect_self();
+            match result {
+                Err(e) => {
+                    tracing::error!("failed to elect self", e);
+                }
+                _ => {}
             }
+
         }
         Ok(())
+    }
+
+    fn handle_elect_self(&self) -> Result<(), MetaError> {
+        self.replica_group_agent.elect_self()?;
+        let _ = self.core_notification.core_state_change();
+        Ok(())
+    }
+
+    async fn elect_self(&self) -> Result<(), MetaError> {
+        let (tx, rx) = C::oneshot();
+        self.tx_task.send(Task::ElectSelf {
+            callback: tx
+        })?;
+        let result = rx.await;
+        result
     }
 
     pub(crate) async fn handle_append_entries_request(
@@ -100,6 +126,28 @@ where
         request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, PacificaError<C>> {
         self.append_entries_handler.handle_append_entries_request(request).await
+    }
+
+    pub(crate) async fn handle_transfer_primary_request(
+        &self,
+        request: TransferPrimaryRequest<C>,
+    ) -> Result<TransferPrimaryResponse, PacificaError<C>> {
+        //
+        let replica_group = self.replica_group_agent.get_replica_group().await?;
+        let cur_term = replica_group.term();
+        if request.term < cur_term {
+            return Ok(TransferPrimaryResponse::higher_term(cur_term))
+        }
+        let result = self.elect_self().await;
+        match result {
+            Ok(_) => {
+                Ok(TransferPrimaryResponse::Success)
+            }
+            Err(e) => {
+                Ok(TransferPrimaryResponse::Success)
+            }
+        }
+
     }
 }
 
@@ -156,6 +204,10 @@ where
     GracePeriodCheck,
 
     AppendEntries { request: AppendEntriesRequest<C> },
+
+    ElectSelf {
+        callback: ResultSender<C, (), MetaError>,
+    }
 }
 
 impl<C> TickFactory for Task<C>

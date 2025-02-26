@@ -100,10 +100,11 @@ where
     pub async fn transfer_primary_to(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.tx_api.send(ApiMsg::TransferPrimary {
-            new_primary: replica_id
+            new_primary: replica_id,
+            callback: result_sender
         }).await?;
-        let log_id = rx.await?;
-        Ok(log_id)
+        rx.await?;
+        Ok(())
     }
 
     pub async fn shutdown(&mut self) -> Result<(), PacificaError<C>> {

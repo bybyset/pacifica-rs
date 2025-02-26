@@ -1,6 +1,5 @@
 use crate::rpc::{RpcClientError, RpcOption, RpcServiceError};
 use crate::{ReplicaId, TypeConfig};
-use bytes::Bytes;
 
 pub struct GetFileRequest {
     pub reader_id: usize,

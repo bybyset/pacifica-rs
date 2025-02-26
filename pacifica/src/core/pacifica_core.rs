@@ -130,8 +130,12 @@ where
                 let result = self.snapshot_executor.snapshot().await;
                 let _ = send_result(callback, result);
             }
-            ApiMsg::TransferPrimary { new_primary } => {
-                self.handle_transfer_primary(new_primary).await;
+            ApiMsg::TransferPrimary {
+                new_primary,
+                callback
+            } => {
+                let result = self.handle_transfer_primary(new_primary).await;
+                let _ = send_result(callback, result);
             }
         }
     }
@@ -179,7 +183,27 @@ where
         self.core_state.handle_commit_operation(operation);
     }
 
-    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) {}
+    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>>{
+        // 1. check
+        // 1.1 check is primary
+        if !self.core_state.is_primary() {
+            return Err(PacificaError::PrimaryButNot)
+        };
+        // 1.2 check in replica group
+        let is_secondary = self.replica_group.is_secondary(new_primary).await.map_err(|e| {
+            PacificaError::MetaError(e)
+        })?;
+        if !is_secondary {
+            return Err(PacificaError::PrimaryButNot)
+        }
+
+        //
+
+        Ok(())
+
+
+    }
+
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
         let old_replica_state = self.core_state.get_replica_state();
@@ -358,18 +382,11 @@ where
         Ok(AppendEntriesResponse {})
     }
 
-    async fn handle_install_snapshot_request(
-        &self,
-        request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
-        self.core_state.handle_replica_recover_request()
-    }
-
     async fn handle_transfer_primary_request(
         &self,
-        request: TransferPrimaryRequest,
+        request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError> {
-        todo!()
+        self.core_state.handle_transfer_primary_request(request).await
     }
 
     async fn handle_replica_recover_request(
@@ -379,4 +396,14 @@ where
         let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| Err(()))?;
         Ok(response)
     }
+
+    async fn handle_install_snapshot_request(
+        &self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
+        let result = self.snapshot_executor.install_snapshot(request).await;
+
+    }
+
+
 }

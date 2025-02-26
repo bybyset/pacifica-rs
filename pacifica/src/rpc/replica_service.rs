@@ -13,14 +13,6 @@ where C: TypeConfig {
     /// Sent by the Primary, sometimes it can be used as a heartbeat request
     async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError>;
 
-    /// Secondary or Candidate accepts the request and processes it.
-    /// Sent by the Primary, Inform that there is a lack of LogEntry available and
-    /// that a snapshot needs to be pulled.
-    async fn handle_install_snapshot_request(
-        &self,
-        request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, RpcServiceError>;
-
     /// Secondary accepts the request and processes it.
     /// Sent by the Primary, and transfer primary
     async fn handle_transfer_primary_request(
@@ -35,4 +27,13 @@ where C: TypeConfig {
         &self,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcServiceError>;
+
+
+    /// Secondary or Candidate accepts the request and processes it.
+    /// Sent by the Primary, Inform that there is a lack of LogEntry available and
+    /// that a snapshot needs to be pulled.
+    async fn handle_install_snapshot_request(
+        &self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<InstallSnapshotResponse, RpcServiceError>;
 }

@@ -10,10 +10,11 @@ use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
 use crate::error::Fatal;
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, ReplicaRecoverRequest, ReplicaRecoverResponse};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaClient, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
+use crate::rpc::RpcServiceError;
 
 mod append_entries_handler;
 mod candidate_state;
@@ -214,6 +215,22 @@ where
             CoreState::Candidate {state} => {
 
             }
+            _ => {
+                tracing::warn!("");
+
+            }
+        }
+
+    }
+
+    pub(crate) async fn handle_transfer_primary_request(
+        &self,
+        request: TransferPrimaryRequest<C>,
+    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
+        match self {
+            CoreState::Secondary {state} => {
+                state.handle_transfer_primary_request(request).await
+            },
             _ => {
                 tracing::warn!("");
 

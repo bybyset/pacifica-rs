@@ -45,7 +45,10 @@ where C: TypeConfig {
 
     StorageError(#[from] StorageError),
 
-    LogManagerError(#[from] LogManagerError<C>)
+    LogManagerError(#[from] LogManagerError<C>),
+
+    /// 期望是Primary但当前副本不是
+    PrimaryButNot
 
 }
 
