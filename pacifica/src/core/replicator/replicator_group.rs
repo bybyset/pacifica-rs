@@ -154,6 +154,21 @@ where
         result
     }
 
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, last_log_index: usize) -> Result<(), ()>{
+        let replicator = self.replicators.get(&new_primary);
+        match replicator {
+            Some(replicator) => {
+                replicator.
+
+
+            }
+            None => {
+                Err(())
+            }
+        }
+
+    }
+
     async fn do_wait_caught_up(&self, replica_id: ReplicaId<C>) -> Result<(), CaughtUpError> {
         let replicator = self.replicators.get(&replica_id);
         match replicator {

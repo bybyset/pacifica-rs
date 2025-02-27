@@ -97,6 +97,21 @@ where
         Ok(())
     }
 
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), ()> {
+
+        // 1.2 check in replica group
+        let is_secondary = self.replica_group_agent.is_secondary(new_primary).await.map_err(|e| {
+            PacificaError::MetaError(e)
+        })?;
+        if !is_secondary {
+            return Err(PacificaError::PrimaryButNot)
+        }
+        let last_log_index = self.log_manager.get_last_log_index();
+        let r = self.replicator_group.transfer_primary(new_primary, last_log_index).await;
+
+        Ok(())
+    }
+
     async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
         match task {
             Task::Commit { operation } => self.handle_commit_task(operation).await?,

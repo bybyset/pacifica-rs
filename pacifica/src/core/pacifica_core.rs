@@ -53,8 +53,6 @@ where
 
     replica_option: Arc<ReplicaOption>,
 
-    replicator_group: Option<ReplicatorGroup<C, FSM>>,
-
     core_state: CoreState<C, FSM>,
 }
 
@@ -184,20 +182,9 @@ where
     }
 
     async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>>{
-        // 1. check
-        // 1.1 check is primary
-        if !self.core_state.is_primary() {
-            return Err(PacificaError::PrimaryButNot)
-        };
-        // 1.2 check in replica group
-        let is_secondary = self.replica_group.is_secondary(new_primary).await.map_err(|e| {
-            PacificaError::MetaError(e)
-        })?;
-        if !is_secondary {
-            return Err(PacificaError::PrimaryButNot)
-        }
 
         //
+        self.core_state.transfer_primary(new_primary);
 
         Ok(())
 

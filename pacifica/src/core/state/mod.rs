@@ -9,10 +9,10 @@ use crate::core::state::primary_state::PrimaryState;
 use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
-use crate::error::Fatal;
+use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::type_config::alias::OneshotReceiverOf;
-use crate::{ReplicaClient, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
+use crate::{ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
 use crate::rpc::RpcServiceError;
 
@@ -177,6 +177,21 @@ where
             }
         }
         Ok(())
+    }
+
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+        match self {
+            CoreState::Primary { state } => {
+                state.transfer_primary(new_primary).await
+            },
+            _ => {
+                return Err(PacificaError::PrimaryButNot)
+            }
+
+        }
+
+
+
     }
 
     pub(crate) async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()>{
