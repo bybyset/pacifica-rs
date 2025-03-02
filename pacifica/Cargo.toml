@@ -17,12 +17,11 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 tracing-futures = { workspace = true }
 
-bytes = {workspace = true}
-byteorder = {workspace = true}
+bytes = { workspace = true }
+byteorder = { workspace = true }
 byte-unit = { workspace = true }
 thiserror = { workspace = true }
 anyerror = { workspace = true }
-anyhow = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, optional = true }

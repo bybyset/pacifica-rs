@@ -1,0 +1,28 @@
+[package]
+name = "rpc-impl-grpc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+categories.workspace = true
+description.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pacifica-rs = {path = "../../pacifica"}
+tonic = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
+prost-derive = { workspace = true, optional = true }
+thiserror = { workspace = true }
+anyerror = { workspace = true }
+
+[dev-dependencies]
+prost-build = { workspace = true}
+tonic-build = { workspace = true}
+
+
+[build-dependencies]
+tonic-build = { workspace = true}

@@ -1,3 +1,4 @@
+use anyerror::AnyError;
 use crate::rpc::message::AppendEntriesRequest;
 use crate::rpc::message::AppendEntriesResponse;
 use crate::rpc::message::InstallSnapshotRequest;
@@ -11,30 +12,31 @@ use crate::rpc::message::TransferPrimaryResponse;
 use crate::rpc::RpcClientError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
-use crate::storage::GetFileClient;
+use crate::error::ConnectError;
 
 pub trait ConnectionClient<C>
 where C: TypeConfig {
 
-    fn connect(&self, _replica_id: &ReplicaId<C>) -> bool {
+    async fn connect(&self, _replica_id: &ReplicaId<C>) -> Result<(), ConnectError<C>> {
+        Ok(())
+    }
+
+    async fn disconnect(&self, _replica_id: &ReplicaId<C>) -> bool {
         true
     }
 
-    fn disconnect(&self, _replica_id: &ReplicaId<C>) -> bool {
-        true
-    }
-
-    fn check_connected(&self, replica_id: &ReplicaId<C>, create_if_absent: bool) -> bool {
+    async fn check_connected(&self, replica_id: &ReplicaId<C>, create_if_absent: bool) -> Result<bool, ConnectError<C>> {
         if !self.is_connected(replica_id) {
             if create_if_absent {
-                return self.connect(replica_id);
+                self.connect(replica_id).await?;
+                return Ok(true)
             }
-            return false
+            return Ok(false)
         }
-        true
+        Ok(true)
     }
 
-    fn is_connected(&self, _replica_id: &ReplicaId<C>) -> bool {
+    async fn is_connected(&self, _replica_id: &ReplicaId<C>) -> bool {
         true
     }
 
@@ -42,7 +44,9 @@ where C: TypeConfig {
 }
 
 
-pub trait ReplicaClient<C>: GetFileClient<C> + ConnectionClient<C>
+
+
+pub trait ReplicaClient<C>: ConnectionClient<C>
 where
     C: TypeConfig,
 {
@@ -64,12 +68,13 @@ where
         &self,
         primary_id: ReplicaId<C>,
         request: ReplicaRecoverRequest<C>,
+        rpc_option: RpcOption,
     ) -> Result<ReplicaRecoverResponse, RpcClientError>;
 
     async fn transfer_primary(
         &self,
         secondary_id: ReplicaId<C>,
-        request: TransferPrimaryRequest,
+        request: TransferPrimaryRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<TransferPrimaryResponse, RpcClientError>;
 

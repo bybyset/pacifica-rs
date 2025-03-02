@@ -1,16 +1,20 @@
 use crate::pacifica::{Codec, Response};
 use crate::runtime::AsyncRuntime;
-use crate::{LogStorage, MetaClient, ReplicaClient, Request, SnapshotStorage};
+use crate::{LogStorage, Request, SnapshotStorage};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use crate::config_cluster::MetaClient;
+use crate::rpc::ReplicaClient;
+
+
 
 pub trait NodeIdEssential:
-    Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+    From<String> + Into<String> + Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
 {
 }
 
 impl<T> NodeIdEssential for T where
-    T: Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+    T: From<String> + Into<String> + Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
 {
 }
 
@@ -72,6 +76,6 @@ pub mod alias {
     pub type WatchReceiverOf<C, T> = <WatchOf<C> as Watch>::Receiver<T>;
 
     pub type SnapshotStorageOf<C> = <C as TypeConfig>::SnapshotStorage;
-    pub type SnapshotReaderOf<C> = <SnapshotStorageOf<C> as SnapshotStorage>::Reader;
-    pub type SnapshotWriteOf<C> = <SnapshotStorageOf<C> as SnapshotStorage>::Writer;
+    pub type SnapshotReaderOf<C> = <SnapshotStorageOf<C> as SnapshotStorage<C>>::Reader;
+    pub type SnapshotWriteOf<C> = <SnapshotStorageOf<C> as SnapshotStorage<C>>::Writer;
 }

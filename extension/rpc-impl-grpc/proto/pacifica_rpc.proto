@@ -1,0 +1,105 @@
+syntax = "proto3";
+package pacifica;
+
+message ReplicaIdProto {
+  string group_name = 1;
+  string node_id = 2;
+}
+
+message LogIdProto {
+  uint64 index = 1;
+  uint64 term = 2;
+}
+
+message LogEntryProto {
+    LogIdProto log_id = 1;
+    uint64 check_sum = 2;
+    bytes payload = 3;
+}
+
+message ResponseError {
+  int64 code = 1;
+  string message = 2;
+}
+
+message AppendEntriesReq {
+  ReplicaIdProto target_id = 1;
+  ReplicaIdProto primary = 2;
+  uint64 version = 3;
+  uint64 term = 4;
+  LogIdProto prev_log = 5;
+  uint64 committed_log_index = 6;
+  repeated LogEntryProto entries = 7;
+}
+
+message AppendEntriesRep {
+  ResponseError error = 1;
+  uint64 term = 2;
+  uint64 last_log_index = 3;
+}
+
+message InstallSnapshotReq {
+  ReplicaIdProto target_id = 1;
+  ReplicaIdProto primary = 2;
+  uint64 version = 3;
+  uint64 term = 4;
+  LogIdProto snapshot_log_id = 5;
+  uint64 reader_id = 6;
+}
+
+message InstallSnapshotRep {
+  ResponseError error = 1;
+}
+
+
+message ReplicaRecoverReq {
+  ReplicaIdProto target_id = 1;
+  ReplicaIdProto recover_id = 2;
+  uint64 version = 3;
+  uint64 term = 4;
+}
+
+message ReplicaRecoverRep {
+  ResponseError error = 1;
+}
+
+message TransferPrimaryReq {
+  ReplicaIdProto target_id = 1;
+  ReplicaIdProto new_primary = 2;
+  uint64 version = 3;
+  uint64 term = 4;
+}
+
+message TransferPrimaryRep {
+  ResponseError error = 1;
+}
+
+message GetFileReq {
+  ReplicaIdProto target_id = 1;
+  uint64 reader_id = 2;
+  string filename = 3;
+  uint64 offset = 4;
+  uint64 count = 5;
+}
+
+message GetFileRep {
+  ResponseError error = 1;
+  bytes data = 2;
+  bool eof = 3;
+}
+
+service PacificaGRpc{
+
+  rpc AppendEntries (AppendEntriesReq) returns (AppendEntriesRep) {}
+
+  rpc InstallSnapshot (InstallSnapshotReq) returns (InstallSnapshotRep) {}
+
+  rpc ReplicaRecover (ReplicaRecoverReq) returns (ReplicaRecoverRep) {}
+
+  rpc TransferPrimary (TransferPrimaryReq) returns (TransferPrimaryRep) {}
+
+  rpc GetFile (GetFileReq) returns (GetFileRep) {}
+
+}
+
+

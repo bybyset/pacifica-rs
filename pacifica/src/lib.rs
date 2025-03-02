@@ -1,15 +1,15 @@
 mod options;
 mod config_cluster;
-mod error;
+pub mod error;
 mod pacifica;
 mod core;
 
 pub mod model;
-mod storage;
+pub mod storage;
 pub mod fsm;
 mod type_config;
 mod runtime;
-mod rpc;
+pub mod rpc;
 mod util;
 
 
@@ -37,8 +37,15 @@ pub use crate::storage::StorageError;
 
 
 
-pub use crate::config_cluster::MetaClient;
-pub use crate::rpc::ReplicaClient;
+// pub use crate::config_cluster::MetaClient;
+// pub use crate::rpc::ReplicaClient;
+// pub use crate::rpc::ReplicaService;
+// pub use crate::rpc::RpcOption;
+// pub use crate::rpc::message;
+// pub use crate::rpc::ConnectionClient;
+
+
+
 
 pub use crate::options::ReplicaOption;
 pub use crate::type_config::TypeConfig;
@@ -48,6 +55,7 @@ pub use crate::runtime::AsyncRuntime;
 
 
 pub use crate::pacifica::Request;
+
 
 
 

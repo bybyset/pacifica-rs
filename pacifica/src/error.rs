@@ -7,6 +7,10 @@ use thiserror::Error;
 
 pub use crate::core::LogManagerError;
 pub use crate::storage::StorageError;
+pub use crate::rpc::RpcClientError;
+pub use crate::rpc::RpcServiceError;
+pub use crate::rpc::ConnectError;
+
 
 /// Fatal is unrecoverable
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
