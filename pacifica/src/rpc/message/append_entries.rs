@@ -14,14 +14,18 @@ where C:TypeConfig {
 
 impl<C> AppendEntriesRequest<C>
 where C:TypeConfig {
-    pub fn new(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
+    pub fn with_no_entries(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
+        Self::with_entries(primary_id, term, version, committed_index, prev_log_id, vec![])
+    }
+
+    pub fn with_entries(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId, entries: Vec<LogEntry>) -> Self {
         Self {
             primary_id,
             term,
             version,
             committed_index,
             prev_log_id,
-            entries: vec![],
+            entries,
         }
     }
 

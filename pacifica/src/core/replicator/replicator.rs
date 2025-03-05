@@ -300,7 +300,7 @@ where
                 let term = self.replica_group_agent.get_term();
                 let version = self.replica_group_agent.get_version();
                 let primary_id = self.primary_id.clone();
-                let request = AppendEntriesRequest::new(primary_id, term, version, committed_index, prev_log_id);
+                let request = AppendEntriesRequest::with_no_entries(primary_id, term, version, committed_index, prev_log_id);
                 Ok(Some(request))
             }
             Err(e) => match e {

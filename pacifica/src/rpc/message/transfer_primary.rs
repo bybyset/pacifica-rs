@@ -6,6 +6,16 @@ where
 {
     pub new_primary_id: ReplicaId<C>,
     pub term: usize,
+    pub version: usize,
+}
+
+impl<C> TransferPrimaryRequest<C>
+where
+    C: TypeConfig,
+{
+    pub fn new(new_primary_id: ReplicaId<C>, term: usize, version: usize) -> TransferPrimaryRequest<C> {
+        TransferPrimaryRequest { new_primary_id, term ,version}
+    }
 }
 
 pub enum TransferPrimaryResponse {

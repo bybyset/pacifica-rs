@@ -64,4 +64,7 @@ pub enum RpcClientError {
     NetworkError { source: AnyError },
 }
 
-pub enum RpcServiceError {}
+pub enum RpcServiceError {
+
+
+}

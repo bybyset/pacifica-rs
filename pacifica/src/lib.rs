@@ -14,6 +14,8 @@ mod util;
 
 
 pub use crate::pacifica::Replica;
+pub use crate::pacifica::ReplicaRouter;
+pub use crate::pacifica::ReplicaManager;
 pub use crate::pacifica::ReplicaBuilder;
 
 

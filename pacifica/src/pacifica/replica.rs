@@ -9,21 +9,31 @@ use crate::rpc::message::{
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
     TransferPrimaryResponse,
 };
-use crate::rpc::{ReplicaService, RpcServiceError};
+use crate::rpc::{ReplicaClient, ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
+use crate::storage::GetFileService;
 use crate::type_config::alias::MpscUnboundedSenderOf;
+use crate::LogId;
 use crate::ReplicaId;
 use crate::ReplicaOption;
 use crate::StateMachine;
 use crate::TypeConfig;
-use crate::{LogId, ReplicaClient};
-use crate::storage::GetFileService;
+use std::ops::Deref;
+use std::sync::Arc;
 
-#[derive(Clone)]
+
 pub struct Replica<C, FSM>
 where
     C: TypeConfig,
-    FSM: StateMachine<C>
+    FSM: StateMachine<C>,
+{
+    inner: Arc<ReplicaInner<C, FSM>>,
+}
+
+struct ReplicaInner<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
 {
     tx_api: TaskSender<C, MpscUnboundedSenderOf<C, ApiMsg<C>>>,
     replica_core: ReplicaComponent<C, ReplicaCore<C, FSM>>,
@@ -32,7 +42,7 @@ where
 impl<C, FSM> Replica<C, FSM>
 where
     C: TypeConfig,
-    FSM: StateMachine<C>
+    FSM: StateMachine<C>,
 {
     /// StateMachine
     /// LogStorage  LogEntryCodec SnapshotStorage
@@ -59,13 +69,16 @@ where
             snapshot_storage,
             meta_client,
             replica_client,
-            replica_option
+            replica_option,
         );
         let mut replica_core = ReplicaComponent::new(replica_core);
         replica_core.startup().await?;
-        let replica = Replica {
+        let replica = ReplicaInner {
             tx_api: TaskSender::new(tx_api),
-            replica_core
+            replica_core,
+        };
+        let replica = Replica {
+            inner: Arc::new(replica),
         };
         Ok(replica)
     }
@@ -77,7 +90,7 @@ where
     pub async fn commit(&self, request: C::Request) -> Result<C::Response, PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         let operation = Operation::new(request, result_sender)?;
-        self.tx_api.send(CommitOperation {operation}).await?;
+        self.inner.tx_api.send(CommitOperation { operation }).await?;
         let response = rx.await?;
         Ok(response)
     }
@@ -86,9 +99,12 @@ where
     /// 执行快照
     pub async fn snapshot(&self) -> Result<LogId, PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
-        self.tx_api.send(ApiMsg::SaveSnapshot {
-            callback: result_sender
-        }).await?;
+        self.inner
+            .tx_api
+            .send(ApiMsg::SaveSnapshot {
+                callback: result_sender,
+            })
+            .await?;
         let log_id = rx.await?;
         Ok(log_id)
     }
@@ -99,18 +115,33 @@ where
 
     pub async fn transfer_primary_to(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
-        self.tx_api.send(ApiMsg::TransferPrimary {
-            new_primary: replica_id,
-            callback: result_sender
-        }).await?;
+        self.inner
+            .tx_api
+            .send(ApiMsg::TransferPrimary {
+                new_primary: replica_id,
+                callback: result_sender,
+            })
+            .await?;
         rx.await?;
         Ok(())
     }
 
     pub async fn shutdown(&mut self) -> Result<(), PacificaError<C>> {
-        self.replica_core.shutdown().await;
+        self.inner.replica_core.shutdown().await;
 
         Ok(())
+    }
+}
+
+impl<C, FSM> Clone for Replica<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    fn clone(&self) -> Replica<C, FSM> {
+        Replica {
+            inner: Arc::clone(&self.inner)
+        }
     }
 }
 
@@ -129,32 +160,29 @@ where
 {
     #[inline]
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        self.replica_core.handle_get_file_request(request).await
+        self.inner.replica_core.handle_get_file_request(request).await
     }
 }
 
 impl<C, FSM> ReplicaService<C> for Replica<C, FSM>
-where C: TypeConfig, FSM: StateMachine<C>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
 {
     #[inline]
-    async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, RpcServiceError> {
-        self.replica_core.handle_append_entries_request(request).await
-    }
-
-    #[inline]
-    async fn handle_install_snapshot_request(
+    async fn handle_append_entries_request(
         &self,
-        request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
-        self.replica_core.handle_install_snapshot_request(request).await
+        request: AppendEntriesRequest<C>,
+    ) -> Result<AppendEntriesResponse, RpcServiceError> {
+        self.inner.replica_core.handle_append_entries_request(request).await
     }
 
     #[inline]
     async fn handle_transfer_primary_request(
         &self,
-        request: TransferPrimaryRequest,
+        request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError> {
-        self.handle_transfer_primary_request(request).await
+        self.inner.replica_core.handle_transfer_primary_request(request).await
     }
 
     #[inline]
@@ -162,6 +190,14 @@ where C: TypeConfig, FSM: StateMachine<C>
         &self,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
-        self.replica_core.handle_replica_recover_request(request).await
+        self.inner.replica_core.handle_replica_recover_request(request).await
+    }
+
+    #[inline]
+    async fn handle_install_snapshot_request(
+        &self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
+        self.inner.replica_core.handle_install_snapshot_request(request).await
     }
 }

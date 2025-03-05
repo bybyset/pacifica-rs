@@ -8,6 +8,17 @@ pub struct GetFileRequest {
     pub count: u64,
 }
 
+impl GetFileRequest {
+    pub fn new(reader_id: usize, filename: String, offset: u64, count: u64) -> GetFileRequest {
+        GetFileRequest {
+            reader_id,
+            filename,
+            offset,
+            count,
+        }
+    }
+}
+
 pub enum GetFileResponse {
     Success { data: Vec<u8>, eof: bool },
     NotFoundReader { reader_id: usize },

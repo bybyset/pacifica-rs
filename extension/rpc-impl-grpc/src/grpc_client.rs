@@ -158,7 +158,9 @@ where
                 let rep = res.into_inner();
                 Ok(from_install_snapshot_rep(rep))
             }
-            Err(e) => {}
+            Err(e) => {
+                e.
+            }
         }
     }
 
@@ -236,10 +238,7 @@ where
 }
 
 fn to_replica_id_proto<C: TypeConfig>(replica_id: &ReplicaId<C>) -> ReplicaIdProto {
-    let group_name = replica_id.group_name();
-    let node_id = replica_id.node_id();
-    let node_id = node_id.into();
-    ReplicaIdProto { group_name, node_id }
+    ReplicaIdProto::from(replica_id)
 }
 
 fn to_log_id_proto(log_id: &LogId) -> LogIdProto {
