@@ -1,5 +1,5 @@
-mod options;
-mod config_cluster;
+pub mod options;
+pub mod config_cluster;
 pub mod error;
 mod pacifica;
 mod core;
@@ -8,9 +8,9 @@ pub mod model;
 pub mod storage;
 pub mod fsm;
 mod type_config;
-mod runtime;
+pub mod runtime;
 pub mod rpc;
-mod util;
+pub mod util;
 
 
 pub use crate::pacifica::Replica;
@@ -52,7 +52,6 @@ pub use crate::storage::StorageError;
 pub use crate::options::ReplicaOption;
 pub use crate::type_config::TypeConfig;
 pub use crate::type_config::NodeId;
-
 pub use crate::runtime::AsyncRuntime;
 
 

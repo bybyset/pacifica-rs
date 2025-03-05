@@ -1,15 +1,17 @@
 use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
-use crate::{ReplicaState, TypeConfig};
+use crate::{ReplicaState, StorageError, TypeConfig};
 use anyerror::AnyError;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
 pub use crate::core::LogManagerError;
-pub use crate::storage::StorageError;
+use crate::fsm::UserStateMachineError;
 pub use crate::rpc::RpcClientError;
 pub use crate::rpc::RpcServiceError;
 pub use crate::rpc::ConnectError;
+
+
 
 
 /// Fatal is unrecoverable
@@ -27,32 +29,30 @@ where
 
 /// PacificaError is returned by API methods of `Replica`.
 
+#[derive(Error)]
 pub enum PacificaError<C>
 where
     C: TypeConfig,
 {
-    #[error(transparent)]
-    APIError,
-
-    //用户状态机中的异常
-    UserFsmError {
-        error: AnyError,
-    },
 
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
 
     #[error(transparent)]
+    APIError,
+    #[error(transparent)]
+    UserFsmError(#[from] UserStateMachineError),
+
+    #[error(transparent)]
     EncodeError(#[from] EncodeError<C::Request>),
-
+    #[error(transparent)]
     MetaError(#[from] MetaError),
-
+    #[error(transparent)]
     StorageError(#[from] StorageError),
-
+    #[error(transparent)]
     LogManagerError(#[from] LogManagerError<C>),
-
-    /// 期望是Primary但当前副本不是
-    PrimaryButNot,
+    #[error(transparent)]
+    ReplicaStateError(#[from] ReplicaStateError)
 }
 
 ///
@@ -70,3 +70,11 @@ impl ReplicaStateError {
         }
     }
 }
+
+impl Display for ReplicaStateError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "The expect ReplicaState is {:?}, but the actual ReplicaState is {:?}", self.expect_state, self.actual_state)
+    }
+}
+
+
