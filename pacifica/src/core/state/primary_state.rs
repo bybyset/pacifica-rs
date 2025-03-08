@@ -8,7 +8,7 @@ use crate::core::replicator::{ReplicatorGroup, ReplicatorType};
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::task_sender::TaskSender;
 use crate::core::{operation, replicator, CoreNotification};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{Fatal, PacificaError, ReplicaStateError};
 use crate::model::LogEntryPayload;
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
@@ -16,7 +16,7 @@ use crate::type_config::alias::{
     JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::{RepeatedTimer, TickFactory};
-use crate::{LogEntry, LogId, ReplicaClient, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
+use crate::{LogEntry, LogId, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -97,14 +97,14 @@ where
         Ok(())
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), ()> {
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
 
         // 1.2 check in replica group
         let is_secondary = self.replica_group_agent.is_secondary(new_primary).await.map_err(|e| {
             PacificaError::MetaError(e)
         })?;
         if !is_secondary {
-            return Err(PacificaError::PrimaryButNot)
+
         }
         let last_log_index = self.log_manager.get_last_log_index();
         let r = self.replicator_group.transfer_primary(new_primary, last_log_index).await;

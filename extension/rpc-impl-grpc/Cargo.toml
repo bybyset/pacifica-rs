@@ -18,6 +18,8 @@ prost = { workspace = true, optional = true }
 prost-derive = { workspace = true, optional = true }
 thiserror = { workspace = true }
 anyerror = { workspace = true }
+tracing = { workspace = true }
+bytes = "1.9.0"
 
 [dev-dependencies]
 prost-build = { workspace = true}

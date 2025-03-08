@@ -1,3 +1,4 @@
+use std::error::Error;
 use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
 use crate::{ReplicaState, StorageError, TypeConfig};
@@ -7,12 +8,9 @@ use thiserror::Error;
 
 pub use crate::core::LogManagerError;
 use crate::fsm::UserStateMachineError;
+pub use crate::rpc::ConnectError;
 pub use crate::rpc::RpcClientError;
 pub use crate::rpc::RpcServiceError;
-pub use crate::rpc::ConnectError;
-
-
-
 
 /// Fatal is unrecoverable
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -34,7 +32,6 @@ pub enum PacificaError<C>
 where
     C: TypeConfig,
 {
-
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
 
@@ -52,29 +49,63 @@ where
     #[error(transparent)]
     LogManagerError(#[from] LogManagerError<C>),
     #[error(transparent)]
-    ReplicaStateError(#[from] ReplicaStateError)
+    ReplicaStateError(#[from] ReplicaStateError),
+}
+
+
+impl<C> Debug for PacificaError<C> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self )
+    }
+}
+
+impl<C> Display for PacificaError<C>
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self )
+    }
+}
+
+impl<C> Error for PacificaError<C>
+{
+
+
 }
 
 ///
 pub struct ReplicaStateError {
-    pub expect_state: ReplicaState,
+    pub expect_state: Vec<ReplicaState>,
     pub actual_state: ReplicaState,
 }
 
 impl ReplicaStateError {
-
-    pub fn primary_but_not(actual_state: ReplicaState) -> ReplicaStateError {
+    pub fn new(expect_state: Vec<ReplicaState>, actual_state: ReplicaState) -> ReplicaStateError {
         ReplicaStateError {
-            expect_state: ReplicaState::Primary,
+            expect_state,
             actual_state,
         }
+    }
+
+    pub fn primary_but_not(actual_state: ReplicaState) -> ReplicaStateError {
+        Self::new(vec![ReplicaState::Primary], actual_state)
+    }
+
+    pub fn secondary_or_candidate_but_not(actual_state: ReplicaState) -> ReplicaStateError {
+        Self::new(vec![ReplicaState::Secondary, ReplicaState::Candidate], actual_state)
+    }
+
+    pub fn secondary_but_not(actual_state: ReplicaState) -> ReplicaStateError {
+        Self::new(vec![ReplicaState::Secondary], actual_state)
     }
 }
 
 impl Display for ReplicaStateError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "The expect ReplicaState is {:?}, but the actual ReplicaState is {:?}", self.expect_state, self.actual_state)
+        write!(
+            f,
+            "The expect ReplicaState is {:?}, but the actual ReplicaState is {:?}",
+            self.expect_state, self.actual_state
+        )
     }
 }
-
 

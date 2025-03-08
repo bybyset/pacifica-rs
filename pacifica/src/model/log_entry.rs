@@ -1,6 +1,7 @@
 use crate::util::{ByteSize, Checksum};
 use crate::LogId;
 use std::fmt::{Debug, Display, Formatter};
+use bytes::Bytes;
 
 pub struct LogEntry {
     pub log_id: LogId,
@@ -14,20 +15,20 @@ pub enum LogEntryPayload {
 
     //
     Normal {
-        op_data: Vec<u8>,
+        op_data: Bytes,
     },
 }
 
 impl LogEntryPayload {
 
-    pub fn new(op_data: Vec<u8>) -> Self {
+    pub fn new(op_data: Bytes) -> Self {
         if op_data.is_empty() {
             Self::empty()
         } else {
             Self::with_bytes(op_data)
         }
     }
-    pub fn with_bytes(op_data: Vec<u8>) -> Self {
+    pub fn with_bytes(op_data: Bytes) -> Self {
         LogEntryPayload::Normal { op_data }
     }
 
@@ -73,7 +74,7 @@ impl LogEntry {
             check_sum: None,
         }
     }
-    pub fn with_op_data(log_id: LogId, op_data: Vec<u8>) -> Self {
+    pub fn with_op_data(log_id: LogId, op_data: Bytes) -> Self {
         LogEntry {
             log_id,
             payload: LogEntryPayload::Normal { op_data },

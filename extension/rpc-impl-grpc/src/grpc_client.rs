@@ -1,21 +1,25 @@
 use crate::pacifica::pacifica_g_rpc_client::PacificaGRpcClient;
-use crate::pacifica::{AppendEntriesRep, AppendEntriesReq, GetFileRep, GetFileReq, InstallSnapshotRep, InstallSnapshotReq, LogEntryProto, LogIdProto, ReplicaIdProto, ReplicaRecoverRep, ReplicaRecoverReq, TransferPrimaryRep, TransferPrimaryReq};
+use crate::pacifica::{
+    AppendEntriesReq, GetFileReq, InstallSnapshotReq, LogEntryProto, LogIdProto, ReplicaIdProto, ReplicaRecoverReq,
+    TransferPrimaryReq,
+};
 use crate::router::Router;
+use crate::RpcResult;
 use anyerror::AnyError;
 use pacifica_rs::error::{ConnectError, RpcClientError};
-use pacifica_rs::model::LogEntryPayload;
 use pacifica_rs::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
 use pacifica_rs::rpc::{ConnectionClient, ReplicaClient, RpcOption};
 use pacifica_rs::storage::{GetFileClient, GetFileRequest, GetFileResponse};
-use pacifica_rs::{LogEntry, LogId, NodeId, ReplicaId, TypeConfig};
+use pacifica_rs::{LogId, NodeId, ReplicaId, TypeConfig};
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Request;
+use tonic::{Code, Request, Status};
 
 const DEF_MAX_ENCODING_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 const DEF_MAX_DECODING_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
@@ -134,9 +138,11 @@ where
         match rep {
             Ok(res) => {
                 let rep = res.into_inner();
-                Ok(from_append_entries_rep(rep))
+                let rpc_result = RpcResult::<AppendEntriesResponse>::from(rep);
+                let response = rpc_result.map_err(|e| RpcClientError::remote(e))?;
+                Ok(response)
             }
-            Err(e) => {}
+            Err(e) => Err(from_status(e)),
         }
     }
 
@@ -156,11 +162,11 @@ where
         match rep {
             Ok(res) => {
                 let rep = res.into_inner();
-                Ok(from_install_snapshot_rep(rep))
+                let rpc_result = RpcResult::<InstallSnapshotResponse>::from(rep);
+                let response = rpc_result.map_err(|e| RpcClientError::remote(e))?;
+                Ok(response)
             }
-            Err(e) => {
-                e.
-            }
+            Err(e) => Err(from_status(e)),
         }
     }
 
@@ -180,9 +186,11 @@ where
         match rep {
             Ok(res) => {
                 let rep = res.into_inner();
-                Ok(from_replica_recover_rep(rep))
+                let rpc_result = RpcResult::<ReplicaRecoverResponse>::from(rep);
+                let response = rpc_result.map_err(|e| RpcClientError::remote(e))?;
+                Ok(response)
             }
-            Err(e) => {}
+            Err(e) => Err(from_status(e)),
         }
     }
 
@@ -202,9 +210,11 @@ where
         match rep {
             Ok(res) => {
                 let rep = res.into_inner();
-                Ok(from_transfer_primary_rep(rep))
+                let rpc_result = RpcResult::<TransferPrimaryResponse>::from(rep);
+                let response = rpc_result.map_err(|e| RpcClientError::remote(e))?;
+                Ok(response)
             }
-            Err(e) => {}
+            Err(e) => Err(from_status(e)),
         }
     }
 }
@@ -230,9 +240,11 @@ where
         match rep {
             Ok(res) => {
                 let rep = res.into_inner();
-                Ok(from_get_file_rep(rep))
+                let rpc_result = RpcResult::<GetFileResponse>::from(rep);
+                let response = rpc_result.map_err(|e| RpcClientError::remote(e))?;
+                Ok(response)
             }
-            Err(e) => {}
+            Err(e) => Err(from_status(e)),
         }
     }
 }
@@ -248,21 +260,6 @@ fn to_log_id_proto(log_id: &LogId) -> LogIdProto {
     }
 }
 
-fn to_log_entry_proto(log_entry: LogEntry) -> LogEntryProto {
-    let log_id_proto = to_log_id_proto(&log_entry.log_id);
-    let check_sum = log_entry.check_sum.map_or(0u64, |x| x);
-    let payload = match log_entry.payload {
-        LogEntryPayload::Empty => Vec::new(),
-        LogEntryPayload::Normal { op_data } => op_data,
-    };
-
-    LogEntryProto {
-        log_id: Some(log_id_proto),
-        check_sum,
-        payload,
-    }
-}
-
 fn to_append_entries_req<C: TypeConfig>(
     target_id: &ReplicaId<C>,
     request: AppendEntriesRequest<C>,
@@ -270,7 +267,7 @@ fn to_append_entries_req<C: TypeConfig>(
     let target_id = to_replica_id_proto(&target_id);
     let primary = to_replica_id_proto(&request.primary_id);
     let prev_log = to_log_id_proto(&request.prev_log_id);
-    let entries = request.entries.into_iter().map(|entry| to_log_entry_proto(entry)).collect::<Vec<LogEntryProto>>();
+    let entries = request.entries.into_iter().map(|entry| LogEntryProto::from(entry)).collect::<Vec<LogEntryProto>>();
     AppendEntriesReq {
         target_id: Some(target_id),
         primary: Some(primary),
@@ -281,8 +278,6 @@ fn to_append_entries_req<C: TypeConfig>(
         entries,
     }
 }
-
-fn from_append_entries_rep<C: TypeConfig>(rep: AppendEntriesRep) -> AppendEntriesResponse {}
 
 fn to_install_snapshot_req<C: TypeConfig>(
     target_id: &ReplicaId<C>,
@@ -301,8 +296,6 @@ fn to_install_snapshot_req<C: TypeConfig>(
     }
 }
 
-fn from_install_snapshot_rep<C: TypeConfig>(rep: InstallSnapshotRep) -> InstallSnapshotResponse {}
-
 fn to_replica_recover_req<C: TypeConfig>(
     target_id: &ReplicaId<C>,
     request: ReplicaRecoverRequest<C>,
@@ -316,8 +309,6 @@ fn to_replica_recover_req<C: TypeConfig>(
         term: request.term as u64,
     }
 }
-
-fn from_replica_recover_rep<C: TypeConfig>(rep: ReplicaRecoverRep) -> ReplicaRecoverResponse {}
 
 fn to_transfer_primary_req<C: TypeConfig>(
     target_id: &ReplicaId<C>,
@@ -333,8 +324,6 @@ fn to_transfer_primary_req<C: TypeConfig>(
     }
 }
 
-fn from_transfer_primary_rep<C: TypeConfig>(rep: TransferPrimaryRep) -> TransferPrimaryResponse {}
-
 fn to_get_file_req<C: TypeConfig>(target_id: &ReplicaId<C>, request: GetFileRequest) -> GetFileReq {
     let target_id = to_replica_id_proto(&target_id);
     GetFileReq {
@@ -345,5 +334,14 @@ fn to_get_file_req<C: TypeConfig>(target_id: &ReplicaId<C>, request: GetFileRequ
         count: request.count,
     }
 }
-
-fn from_get_file_rep<C: TypeConfig>(rep: GetFileRep) -> GetFileResponse {}
+fn from_status(status: Status) -> RpcClientError {
+    let code = status.code();
+    match code {
+        Code::DeadlineExceeded => RpcClientError::Timeout,
+        Code::Cancelled => RpcClientError::Timeout,
+        _ => {
+            let any_error = AnyError::error(status.message());
+            RpcClientError::network(any_error)
+        }
+    }
+}

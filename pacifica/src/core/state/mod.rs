@@ -9,19 +9,23 @@ use crate::core::state::primary_state::PrimaryState;
 use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
-use crate::error::{Fatal, PacificaError};
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
-use crate::type_config::alias::OneshotReceiverOf;
-use crate::{ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
-use std::sync::Arc;
+use crate::error::{Fatal, PacificaError, ReplicaStateError};
+use crate::rpc::message::{
+    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
+};
 use crate::rpc::RpcServiceError;
+use crate::type_config::alias::OneshotReceiverOf;
+use crate::{ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
+use std::sync::Arc;
+use crate::core::snapshot::SnapshotExecutor;
 
 mod append_entries_handler;
 mod candidate_state;
+mod install_snapshot_handler;
 mod primary_state;
 mod secondary_state;
 mod stateless_state;
-mod install_snapshot_handler;
 
 pub(crate) enum CoreState<C, FSM>
 where
@@ -52,7 +56,8 @@ where
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-
+        snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
+        core_notification: Arc<CoreNotification<C>>,
         replica_client: Arc<C::ReplicaClient>,
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C, FSM> {
@@ -61,7 +66,9 @@ where
             next_log_index,
             fsm_caller,
             log_manager,
+            snapshot_executor,
             replica_group_agent,
+            core_notification,
             replica_client,
             replica_option,
         );
@@ -155,55 +162,61 @@ where
         state
     }
 
-    pub(crate) fn commit_operation(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
+    pub(crate) fn commit_operation(&self, operation: Operation<C>) -> Result<(), PacificaError<C>> {
         match self {
             CoreState::Primary { state: primary } => {
                 primary.commit(operation)?;
+                Ok(())
             }
             _ => {
-                tracing::warn!("");
+                let error = PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
+                    self.get_replica_state(),
+                ));
+                tracing::warn!("commit_operation, occurred an error: {}", error);
+                Err(error)
             }
         }
-        Ok(())
     }
 
-    pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), Fatal<C>> {
+    pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), PacificaError<C>> {
         match self {
             CoreState::Primary { state: primary } => {
                 primary.send_commit_result(result)?;
+                Ok(())
             }
             _ => {
-                tracing::debug!("");
+                let error = PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
+                    self.get_replica_state(),
+                ));
+                tracing::warn!("send_commit_result, occurred an error: {}", error);
+                Err(error)
             }
         }
-        Ok(())
+
     }
 
     pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
         match self {
-            CoreState::Primary { state } => {
-                state.transfer_primary(new_primary).await
-            },
-            _ => {
-                return Err(PacificaError::PrimaryButNot)
-            }
-
+            CoreState::Primary { state } => state.transfer_primary(new_primary).await,
+            _ => Err(PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
+                self.get_replica_state(),
+            ))),
         }
-
-
-
     }
 
-    pub(crate) async fn handle_append_entries_request(&self, request: AppendEntriesRequest<C>) -> Result<AppendEntriesResponse, ()>{
+    pub(crate) async fn handle_append_entries_request(
+        &self,
+        request: AppendEntriesRequest<C>,
+    ) -> Result<AppendEntriesResponse, PacificaError<C>> {
         match self {
-            CoreState::Secondary { state } => {
-                state.handle_append_entries_request(request).await;
-            }
-            CoreState::Candidate { state } => {
-                state.handle_append_entries_request(request).await;
-            }
+            CoreState::Secondary { state } => state.handle_append_entries_request(request).await,
+            CoreState::Candidate { state } => state.handle_append_entries_request(request).await,
             _ => {
-                tracing::warn!("");
+                let error = PacificaError::ReplicaStateError(ReplicaStateError::secondary_or_candidate_but_not(
+                    self.get_replica_state(),
+                ));
+                tracing::warn!("handle append_entries_request, occurred an error: {}", error);
+                Err(error)
             }
         }
     }
@@ -211,47 +224,48 @@ where
     pub(crate) async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, Fatal<C>> {
+    ) -> Result<ReplicaRecoverResponse, PacificaError<C>> {
         match self {
             CoreState::Primary { state: primary } => primary.replica_recover(request).await,
             _ => {
-                tracing::warn!("");
-                Err(Fatal::Shutdown)
+                let error =
+                    PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(self.get_replica_state()));
+                tracing::warn!("handle replica_recover_request, occurred an error: {}", error);
+                Err(error)
             }
         }
     }
 
-    pub(crate) async fn handle_install_snapshot_request(&self, request: InstallSnapshotRequest<C>) {
-
+    pub(crate) async fn handle_install_snapshot_request(
+        &self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<InstallSnapshotResponse, PacificaError<C>> {
         match self {
-            CoreState::Secondary {state} => {
-
-            },
-            CoreState::Candidate {state} => {
-
-            }
+            CoreState::Secondary { state } => {}
+            CoreState::Candidate { state } => {}
             _ => {
-                tracing::warn!("");
-
+                let error = PacificaError::ReplicaStateError(ReplicaStateError::secondary_or_candidate_but_not(
+                    self.get_replica_state(),
+                ));
+                tracing::warn!("handle install_snapshot_request, occurred an error: {}", error);
+                Err(error)
             }
         }
-
     }
 
     pub(crate) async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
-    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
+    ) -> Result<TransferPrimaryResponse, PacificaError<C>> {
         match self {
-            CoreState::Secondary {state} => {
-                state.handle_transfer_primary_request(request).await
-            },
+            CoreState::Secondary { state } => state.handle_transfer_primary_request(request).await,
             _ => {
-                tracing::warn!("");
-
+                let error =
+                    PacificaError::ReplicaStateError(ReplicaStateError::secondary_but_not(self.get_replica_state()));
+                tracing::warn!("handle transfer_primary_request, occurred an error: {}", error);
+                Err(error)
             }
         }
-
     }
 }
 

@@ -1,6 +1,5 @@
 use crate::rpc::error::RpcServiceError;
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
-use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::rpc::message::{TransferPrimaryRequest, TransferPrimaryResponse};
@@ -17,7 +16,7 @@ where C: TypeConfig {
     /// Sent by the Primary, and transfer primary
     async fn handle_transfer_primary_request(
         &self,
-        request: TransferPrimaryRequest,
+        request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError>;
 
     /// Primary accepts the request and processes it.

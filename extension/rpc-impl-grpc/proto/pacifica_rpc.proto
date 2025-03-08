@@ -18,9 +18,11 @@ message LogEntryProto {
 }
 
 message ResponseError {
-  int64 code = 1;
+  int32 code = 1;
   string message = 2;
 }
+
+
 
 message AppendEntriesReq {
   ReplicaIdProto target_id = 1;
@@ -88,17 +90,29 @@ message GetFileRep {
   bool eof = 3;
 }
 
+
+message RpcResponse {
+  ResponseError error = 1;
+  oneof response {
+    AppendEntriesRep append_entries_rep = 2;
+    InstallSnapshotRep install_snapshot_rep = 3;
+    ReplicaRecoverRep replica_recover_rep = 4;
+    TransferPrimaryRep transfer_primary_rep = 5;
+    GetFileRep get_file_rep = 6;
+  }
+}
+
 service PacificaGRpc{
 
-  rpc AppendEntries (AppendEntriesReq) returns (AppendEntriesRep) {}
+  rpc AppendEntries (AppendEntriesReq) returns (RpcResponse) {}
 
-  rpc InstallSnapshot (InstallSnapshotReq) returns (InstallSnapshotRep) {}
+  rpc InstallSnapshot (InstallSnapshotReq) returns (RpcResponse) {}
 
-  rpc ReplicaRecover (ReplicaRecoverReq) returns (ReplicaRecoverRep) {}
+  rpc ReplicaRecover (ReplicaRecoverReq) returns (RpcResponse) {}
 
-  rpc TransferPrimary (TransferPrimaryReq) returns (TransferPrimaryRep) {}
+  rpc TransferPrimary (TransferPrimaryReq) returns (RpcResponse) {}
 
-  rpc GetFile (GetFileReq) returns (GetFileRep) {}
+  rpc GetFile (GetFileReq) returns (RpcResponse) {}
 
 }
 

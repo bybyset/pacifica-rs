@@ -24,8 +24,8 @@ pub struct LogEntryProto {
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ResponseError {
-    #[prost(int64, tag = "1")]
-    pub code: i64,
+    #[prost(int32, tag = "1")]
+    pub code: i32,
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
 }
@@ -129,6 +129,29 @@ pub struct GetFileRep {
     #[prost(bool, tag = "3")]
     pub eof: bool,
 }
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RpcResponse {
+    #[prost(message, optional, tag = "1")]
+    pub error: ::core::option::Option<ResponseError>,
+    #[prost(oneof = "rpc_response::Response", tags = "2, 3, 4, 5, 6")]
+    pub response: ::core::option::Option<rpc_response::Response>,
+}
+/// Nested message and enum types in `RpcResponse`.
+pub mod rpc_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Response {
+        #[prost(message, tag = "2")]
+        AppendEntriesRep(super::AppendEntriesRep),
+        #[prost(message, tag = "3")]
+        InstallSnapshotRep(super::InstallSnapshotRep),
+        #[prost(message, tag = "4")]
+        ReplicaRecoverRep(super::ReplicaRecoverRep),
+        #[prost(message, tag = "5")]
+        TransferPrimaryRep(super::TransferPrimaryRep),
+        #[prost(message, tag = "6")]
+        GetFileRep(super::GetFileRep),
+    }
+}
 /// Generated client implementations.
 pub mod pacifica_g_rpc_client {
     #![allow(
@@ -223,10 +246,7 @@ pub mod pacifica_g_rpc_client {
         pub async fn append_entries(
             &mut self,
             request: impl tonic::IntoRequest<super::AppendEntriesReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::AppendEntriesRep>,
-            tonic::Status,
-        > {
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -247,10 +267,7 @@ pub mod pacifica_g_rpc_client {
         pub async fn install_snapshot(
             &mut self,
             request: impl tonic::IntoRequest<super::InstallSnapshotReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::InstallSnapshotRep>,
-            tonic::Status,
-        > {
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -271,10 +288,7 @@ pub mod pacifica_g_rpc_client {
         pub async fn replica_recover(
             &mut self,
             request: impl tonic::IntoRequest<super::ReplicaRecoverReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::ReplicaRecoverRep>,
-            tonic::Status,
-        > {
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -295,10 +309,7 @@ pub mod pacifica_g_rpc_client {
         pub async fn transfer_primary(
             &mut self,
             request: impl tonic::IntoRequest<super::TransferPrimaryReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::TransferPrimaryRep>,
-            tonic::Status,
-        > {
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -319,7 +330,7 @@ pub mod pacifica_g_rpc_client {
         pub async fn get_file(
             &mut self,
             request: impl tonic::IntoRequest<super::GetFileReq>,
-        ) -> std::result::Result<tonic::Response<super::GetFileRep>, tonic::Status> {
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status> {
             self.inner
                 .ready()
                 .await
@@ -355,35 +366,23 @@ pub mod pacifica_g_rpc_server {
         async fn append_entries(
             &self,
             request: tonic::Request<super::AppendEntriesReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::AppendEntriesRep>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status>;
         async fn install_snapshot(
             &self,
             request: tonic::Request<super::InstallSnapshotReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::InstallSnapshotRep>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status>;
         async fn replica_recover(
             &self,
             request: tonic::Request<super::ReplicaRecoverReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::ReplicaRecoverRep>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status>;
         async fn transfer_primary(
             &self,
             request: tonic::Request<super::TransferPrimaryReq>,
-        ) -> std::result::Result<
-            tonic::Response<super::TransferPrimaryRep>,
-            tonic::Status,
-        >;
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status>;
         async fn get_file(
             &self,
             request: tonic::Request<super::GetFileReq>,
-        ) -> std::result::Result<tonic::Response<super::GetFileRep>, tonic::Status>;
+        ) -> std::result::Result<tonic::Response<super::RpcResponse>, tonic::Status>;
     }
     #[derive(Debug)]
     pub struct PacificaGRpcServer<T> {
@@ -468,7 +467,7 @@ pub mod pacifica_g_rpc_server {
                         T: PacificaGRpc,
                     > tonic::server::UnaryService<super::AppendEntriesReq>
                     for AppendEntriesSvc<T> {
-                        type Response = super::AppendEntriesRep;
+                        type Response = super::RpcResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -513,7 +512,7 @@ pub mod pacifica_g_rpc_server {
                         T: PacificaGRpc,
                     > tonic::server::UnaryService<super::InstallSnapshotReq>
                     for InstallSnapshotSvc<T> {
-                        type Response = super::InstallSnapshotRep;
+                        type Response = super::RpcResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -558,7 +557,7 @@ pub mod pacifica_g_rpc_server {
                         T: PacificaGRpc,
                     > tonic::server::UnaryService<super::ReplicaRecoverReq>
                     for ReplicaRecoverSvc<T> {
-                        type Response = super::ReplicaRecoverRep;
+                        type Response = super::RpcResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -603,7 +602,7 @@ pub mod pacifica_g_rpc_server {
                         T: PacificaGRpc,
                     > tonic::server::UnaryService<super::TransferPrimaryReq>
                     for TransferPrimarySvc<T> {
-                        type Response = super::TransferPrimaryRep;
+                        type Response = super::RpcResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
@@ -646,7 +645,7 @@ pub mod pacifica_g_rpc_server {
                     struct GetFileSvc<T: PacificaGRpc>(pub Arc<T>);
                     impl<T: PacificaGRpc> tonic::server::UnaryService<super::GetFileReq>
                     for GetFileSvc<T> {
-                        type Response = super::GetFileRep;
+                        type Response = super::RpcResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,

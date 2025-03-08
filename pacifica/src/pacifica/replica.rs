@@ -173,7 +173,7 @@ where
     async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,
-    ) -> Result<AppendEntriesResponse, RpcServiceError> {
+    ) -> Result<AppendEntriesResponse, RpcServiceError<C>> {
         self.inner.replica_core.handle_append_entries_request(request).await
     }
 
@@ -181,7 +181,7 @@ where
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
-    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
+    ) -> Result<TransferPrimaryResponse, RpcServiceError<C>> {
         self.inner.replica_core.handle_transfer_primary_request(request).await
     }
 
@@ -189,7 +189,7 @@ where
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
+    ) -> Result<ReplicaRecoverResponse, RpcServiceError<C>> {
         self.inner.replica_core.handle_replica_recover_request(request).await
     }
 
@@ -197,7 +197,7 @@ where
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
+    ) -> Result<InstallSnapshotResponse, RpcServiceError<C>> {
         self.inner.replica_core.handle_install_snapshot_request(request).await
     }
 }
