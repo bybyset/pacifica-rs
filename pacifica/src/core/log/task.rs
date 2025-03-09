@@ -1,6 +1,7 @@
 use crate::core::log::LogManagerError;
 use crate::core::ResultSender;
 use crate::{LogEntry, LogId, TypeConfig};
+use crate::error::PacificaError;
 
 pub(crate) enum Task<C>
 where
@@ -25,5 +26,6 @@ where
 
     OnSnapshot {
         snapshot_log_id: LogId,
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 }

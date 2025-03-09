@@ -1,8 +1,7 @@
-use crate::core::fsm::StateMachineError;
 use crate::core::ResultSender;
-use crate::core::snapshot::SnapshotError;
 use crate::{LogId, TypeConfig};
-use crate::rpc::message::InstallSnapshotRequest;
+use crate::error::PacificaError;
+use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 
 pub(crate) enum Task<C>
 where
@@ -10,16 +9,16 @@ where
 {
 
     SnapshotLoad {
-        callback: ResultSender<C, (), SnapshotError<C>>,
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 
     SnapshotSave {
-        callback: ResultSender<C, LogId, SnapshotError<C>>,
+        callback: ResultSender<C, LogId, PacificaError<C>>,
     },
 
     InstallSnapshot {
         request: InstallSnapshotRequest<C>,
-        callback: ResultSender<C, (), SnapshotError<C>>,
+        callback: ResultSender<C, InstallSnapshotResponse, PacificaError<C>>,
     },
 
     SnapshotTick

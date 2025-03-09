@@ -20,6 +20,8 @@ pub enum ErrorSubject {
     TruncateSuffix { last_log_index_kept: usize },
     ResetLogStorage { next_log_index: usize },
     GetLogEntry { log_index: usize },
+
+    DownloadSnapshot {reader_id: usize},
 }
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -82,5 +84,9 @@ impl StorageError {
             ErrorVerb::Write,
             source,
         )
+    }
+
+    pub fn download_snapshot(reader_id: usize, source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::DownloadSnapshot {reader_id}, ErrorVerb::Write, source)
     }
 }

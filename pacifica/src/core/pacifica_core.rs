@@ -125,7 +125,7 @@ where
                 let _ = send_result(callback, result);
             }
             ApiMsg::SaveSnapshot { callback } => {
-                let result = self.snapshot_executor.snapshot().await;
+                let result = self.snapshot_executor.save_snapshot().await;
                 let _ = send_result(callback, result);
             }
             ApiMsg::TransferPrimary { new_primary, callback } => {
@@ -392,6 +392,17 @@ where
         &self,
         request: InstallSnapshotRequest<C>,
     ) -> Result<InstallSnapshotResponse, RpcServiceError> {
+        let replica_group =
+            self.replica_group.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+        let version = replica_group.version();
+        if request.version > version {
+            let _ = self.core_notification.higher_version(request.version);
+        }
+        let term = replica_group.term();
+        if request.term < term {
+            tracing::debug!("received lower term");
+            return Ok(InstallSnapshotResponse::higher_term(term));
+        }
         self.snapshot_executor.install_snapshot(request).await.map_err(|e| RpcServiceError::from(e))
     }
 }

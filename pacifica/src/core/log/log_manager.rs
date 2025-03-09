@@ -1,7 +1,7 @@
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::log::{LogManagerError, Task};
 use crate::core::task_sender::TaskSender;
-use crate::error::Fatal;
+use crate::error::{Fatal, PacificaError};
 use crate::model::NOT_FOUND_INDEX;
 use crate::model::NOT_FOUND_TERM;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
@@ -63,8 +63,12 @@ where
             Task::Reset { next_log_index } => {
                 let _ = self.handle_reset(next_log_index).await;
             }
-            Task::OnSnapshot { snapshot_log_id } => {
-                let _ = self.handle_on_snapshot(snapshot_log_id).await;
+            Task::OnSnapshot {
+                snapshot_log_id ,
+                callback
+            } => {
+                let result = self.handle_on_snapshot(snapshot_log_id).await;
+                let _ = send_result(callback, result);
             }
         }
 
@@ -245,8 +249,13 @@ where
 
     /// be called after event: snapshot load done or snapshot save done
     /// We will crop the op log
-    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), Fatal<C>> {
-        self.tx_task.send(Task::OnSnapshot { snapshot_log_id })?;
+    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), PacificaError<C>> {
+        let (callback, rx) = C::oneshot();
+        self.tx_task.send(Task::OnSnapshot {
+            snapshot_log_id,
+            callback,
+        })?;
+        rx.await?;
         Ok(())
     }
 
@@ -364,7 +373,7 @@ where
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() => {
-                        tracing::info!("received shutdown signal.");
+                        tracing::debug!("LogManager received shutdown signal.");
                         break;
                 }
 

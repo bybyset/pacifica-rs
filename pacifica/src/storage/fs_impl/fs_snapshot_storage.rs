@@ -1,7 +1,6 @@
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
 use crate::storage::fs_impl::file_service::{FileReader, FileService};
 use crate::storage::get_file_rpc::GetFileClient;
-use crate::storage::fs_impl::GetFileService;
 use crate::storage::{GetFileService, SnapshotReader, SnapshotWriter};
 use crate::util::Closeable;
 use crate::{LogId, ReplicaId, SnapshotStorage, TypeConfig};

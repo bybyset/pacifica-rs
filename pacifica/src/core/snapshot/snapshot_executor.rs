@@ -3,11 +3,9 @@ use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::snapshot::task::Task;
-use crate::core::snapshot::SnapshotError;
 use crate::core::task_sender::TaskSender;
-use crate::core::Command;
 use crate::core::ResultSender;
-use crate::error::Fatal;
+use crate::error::{Fatal, PacificaError};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotReader};
 use crate::type_config::alias::{
@@ -94,7 +92,7 @@ where
         Ok(())
     }
 
-    async fn do_snapshot_save(&mut self, log_index_margin: usize) -> Result<LogId, SnapshotError<C>> {
+    async fn do_snapshot_save(&mut self, log_index_margin: usize) -> Result<LogId, PacificaError<C>> {
         let committed_log_index = self.fsm_caller.get_committed_log_index();
         let distance = committed_log_index - self.last_snapshot_log_id.index;
         if distance <= log_index_margin {
@@ -107,7 +105,7 @@ where
         Ok(snapshot_log_id)
     }
 
-    async fn do_snapshot_load(&mut self) -> Result<LogId, SnapshotError<C>> {
+    async fn do_snapshot_load(&mut self) -> Result<LogId, PacificaError<C>> {
         // open snapshot reader
         let snapshot_reader = self.snapshot_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
         if let Some(snapshot_reader) = snapshot_reader {
@@ -116,7 +114,7 @@ where
                 .fsm_caller
                 .on_snapshot_load(AutoClose::new(snapshot_reader))
                 .await
-                .map_err(|err| SnapshotError::StateMachineError(err))?;
+                .map_err(|err| PacificaError::S (err))?;
             //
             self.on_snapshot_success(snapshot_log_id.clone()).await?;
             return Ok(snapshot_log_id);
@@ -125,23 +123,21 @@ where
     }
 
     /// success to snapshot load/save
-    async fn on_snapshot_success(&mut self, snapshot_log_id: LogId) -> Result<(), SnapshotError<C>> {
+    async fn on_snapshot_success(&mut self, snapshot_log_id: LogId) -> Result<(), PacificaError<C>> {
         // set last_snapshot_log_id
         self.last_snapshot_log_id = snapshot_log_id.clone();
         // trigger log manager on snapshot
         self.log_manager
             .on_snapshot(snapshot_log_id)
-            .await
-            .map_err(|err| SnapshotError::LogManagerError(err))?;
+            .await?;
         Ok(())
     }
 
-    async fn do_snapshot_install(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), SnapshotError<C>> {
+    async fn do_snapshot_install(&mut self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, PacificaError<C>> {
         // 1. check
-
         if request.snapshot_log_id <= self.last_snapshot_log_id {
             // has been installed.
-            return Err();
+            return Ok(InstallSnapshotResponse::Success);
         }
         // 2. downloading snapshot
         let target_id = request.primary_id.clone();
@@ -149,49 +145,45 @@ where
         // 3. load snapshot
         let log_id = self.do_snapshot_load().await?;
         assert_eq!(log_id, request.snapshot_log_id);
-        Ok(())
+        Ok(InstallSnapshotResponse::Success)
     }
 
-    async fn do_snapshot_download(&mut self, target_id: ReplicaId<C>, download_id: usize) -> Result<(), SnapshotError<C>> {
+    async fn do_snapshot_download(&mut self, target_id: ReplicaId<C>, download_id: usize) -> Result<(), StorageError> {
         self.snapshot_storage.download_snapshot(target_id, download_id).await.map_err(|e| {
-            SnapshotError::DownloadError {
-                source: e
-            }
+            StorageError::download_snapshot(download_id, e)
         })?;
         Ok(())
     }
 
-    pub(crate) async fn load_snapshot(&self) -> Result<LogId, SnapshotError<C>> {
+    pub(crate) async fn load_snapshot(&self) -> Result<LogId, PacificaError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotLoad { callback })?;
         let snapshot_log_id = rx_result.await?;
         Ok(snapshot_log_id)
     }
 
-    pub(crate) async fn snapshot(&self) -> Result<LogId, SnapshotError<C>> {
+    pub(crate) async fn save_snapshot(&self) -> Result<LogId, PacificaError<C>> {
         let (callback, rx) = C::oneshot();
         self.tx_task.send(Task::SnapshotSave { callback })?;
         let log_id = rx.await?;
         log_id
     }
 
-    pub(crate) async fn install_snapshot(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, SnapshotError<C>> {
+    pub(crate) async fn install_snapshot(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, PacificaError<C>> {
         let (callback, rx) = C::oneshot();
         self.tx_task.send(Task::InstallSnapshot {
             request,
             callback
         })?;
-        rx.await?;
-        Ok(())
-
-
+        let response = rx.await?;
+        Ok(response)
     }
 
     pub(crate) fn get_last_snapshot_log_id(&self) -> LogId {
         self.last_snapshot_log_id.clone()
     }
 
-    pub(crate) async fn open_snapshot_reader(&mut self) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, SnapshotError<C>> {
+    pub(crate) async fn open_snapshot_reader(&mut self) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, PacificaError<C>> {
         let snapshot_reader = self.snapshot_storage.open_reader().await.map_err(|e| {
             StorageError::open_reader(e);
         })?;
