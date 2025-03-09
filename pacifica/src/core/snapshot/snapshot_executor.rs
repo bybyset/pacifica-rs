@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tracing_futures::Instrument;
-use crate::rpc::message::InstallSnapshotRequest;
+use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::RpcServiceError;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
@@ -175,7 +175,7 @@ where
         log_id
     }
 
-    pub(crate) async fn install_snapshot(&self, request: InstallSnapshotRequest<C>) -> Result<(), SnapshotError<C>> {
+    pub(crate) async fn install_snapshot(&self, request: InstallSnapshotRequest<C>) -> Result<InstallSnapshotResponse, SnapshotError<C>> {
         let (callback, rx) = C::oneshot();
         self.tx_task.send(Task::InstallSnapshot {
             request,

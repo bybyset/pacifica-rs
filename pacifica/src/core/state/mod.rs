@@ -204,6 +204,15 @@ where
         }
     }
 
+    pub(crate) async fn replica_recover(&self) -> Result<(), PacificaError<C>> {
+        match self {
+            CoreState::Candidate { state } => state.recover().await,
+            _ => Err(PacificaError::ReplicaStateError(ReplicaStateError::candidate_but_not(
+                self.get_replica_state(),
+            ))),
+        }
+    }
+
     pub(crate) async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,

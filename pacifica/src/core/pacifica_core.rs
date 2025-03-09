@@ -5,7 +5,7 @@ use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
-use crate::core::replica_msg::{ApiMsg, RpcMsg};
+use crate::core::replica_msg::{ApiMsg};
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::{CoreNotification, CoreState};
@@ -22,10 +22,7 @@ use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
 use crate::util::{send_result, RepeatedTimer};
-use crate::{
-    LogStorage, MetaClient, ReplicaClient, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine,
-    TypeConfig,
-};
+use crate::{LogStorage, ReplicaId, ReplicaOption, ReplicaState, SnapshotStorage, StateMachine, TypeConfig};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -112,8 +109,6 @@ where
             replica_client,
             meta_client,
             replica_option,
-
-            replicator_group: None,
             core_state: CoreState::Shutdown,
         }
     }
@@ -123,15 +118,17 @@ where
             ApiMsg::CommitOperation { operation } => {
                 self.handle_commit(operation);
             }
-            ApiMsg::Recovery {} => {}
+            ApiMsg::Recovery {
+                callback
+            } => {
+                let result = self.handle_replica_recover().await;
+                let _ = send_result(callback, result);
+            }
             ApiMsg::SaveSnapshot { callback } => {
                 let result = self.snapshot_executor.snapshot().await;
                 let _ = send_result(callback, result);
             }
-            ApiMsg::TransferPrimary {
-                new_primary,
-                callback
-            } => {
+            ApiMsg::TransferPrimary { new_primary, callback } => {
                 let result = self.handle_transfer_primary(new_primary).await;
                 let _ = send_result(callback, result);
             }
@@ -154,6 +151,10 @@ where
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn get_replica_state(&self) -> ReplicaState {
+        self.core_state.get_replica_state()
     }
 
     async fn handle_receive_higher_term(&mut self, term: usize) -> Result<(), Fatal<C>> {
@@ -181,16 +182,15 @@ where
         self.core_state.handle_commit_operation(operation);
     }
 
-    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>>{
-
-        //
-        self.core_state.transfer_primary(new_primary);
-
-        Ok(())
-
-
+    #[inline]
+    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+        self.core_state.transfer_primary(new_primary).await
     }
 
+    #[inline]
+    async fn handle_replica_recover(&mut self) -> Result<(), PacificaError<C>> {
+        self.core_state.replica_recover().await
+    }
 
     async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
         let old_replica_state = self.core_state.get_replica_state();
@@ -223,13 +223,17 @@ where
             ReplicaState::Primary => {
                 let fsm_caller = self.fsm_caller.clone();
                 let log_manager = self.log_manager.clone();
+                let snapshot_executor = self.snapshot_executor.clone();
                 let replica_group_agent = self.replica_group.clone();
                 let replica_client = self.replica_client.clone();
                 let replica_option = self.replica_option.clone();
+                let core_notification = self.core_notification.clone();
                 CoreState::new_primary(
                     fsm_caller,
                     log_manager,
                     replica_group_agent,
+                    snapshot_executor,
+                    core_notification,
                     replica_client,
                     replica_option,
                 )
@@ -313,14 +317,14 @@ where
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() =>{
-                    tracing::info!("received shutdown signal.");
+                    tracing::info!("ReplicaCore received shutdown signal.");
                     break;
                 }
 
                 api_msg = self.rx_api.recv().fuse() =>{
                     match api_msg {
                         Some(msg) => {
-                            self.handle_api_msg(msg).await;
+                            let _ = self.handle_api_msg(msg).await;
                         },
                         None => {
 
@@ -329,10 +333,12 @@ where
                 }
 
                 notification_msg = self.rx_notification.recv().fuse() =>{
-
                     match notification_msg{
                         Some(msg) => {
-                            self.handle_notification_msg(msg).await?;
+                            let result =  self.handle_notification_msg(msg).await;
+                            result.map_err(|e| {
+                                tracing::warn!("ReplicaCore handle notification msg, but Fatal: {}", e)
+                            })
                         },
                         None => {
 
@@ -365,32 +371,27 @@ where
         &self,
         request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, RpcServiceError> {
-        let response = self.core_state.handle_append_entries_request(request).await;
-        Ok(AppendEntriesResponse {})
+        self.core_state.handle_append_entries_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError> {
-        self.core_state.handle_transfer_primary_request(request).await
+        self.core_state.handle_transfer_primary_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
-        let response = self.core_state.handle_replica_recover_request(request).await.map_err(|e| Err(()))?;
-        Ok(response)
+        self.core_state.handle_replica_recover_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
     ) -> Result<InstallSnapshotResponse, RpcServiceError> {
-        let result = self.snapshot_executor.install_snapshot(request).await;
-
+        self.snapshot_executor.install_snapshot(request).await.map_err(|e| RpcServiceError::from(e))
     }
-
-
 }

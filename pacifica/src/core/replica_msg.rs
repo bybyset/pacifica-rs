@@ -23,30 +23,8 @@ where
     },
 
     Recovery {
-
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 
-
-}
-
-
-pub(crate) enum RpcMsg {
-
-    AppendEntries {
-        request: AppendEntriesRequest,
-    },
-
-    InstallSnapshot {
-        request: InstallSnapshotRequest,
-    },
-    ReplicaRecover {
-        request: ReplicaRecoverRequest,
-    },
-    TransferPrimary {
-        request: TransferPrimaryRequest,
-    },
-    GetFile {
-        request: GetFileRequest,
-    }
 
 }

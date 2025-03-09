@@ -1,4 +1,4 @@
-use crate::pacifica::{AppendEntriesRep, ResponseError};
+use crate::pacifica::{AppendEntriesRep, ReplicaRecoverRep, ResponseError};
 
 pub const CODE_SUCCESS: i32 = 0;
 pub const CODE_HIGHER_TERM: i32 = 1;
@@ -45,4 +45,17 @@ impl AppendEntriesRep {
         }
     }
 
+}
+
+
+impl ReplicaRecoverRep {
+
+    pub fn higher_term(term: u64) -> ReplicaRecoverRep {
+        let error = ResponseError::higher_term();
+        ReplicaRecoverRep {
+            error: Some(error),
+            term,
+        }
+    }
+    
 }

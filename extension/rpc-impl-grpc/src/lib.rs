@@ -5,7 +5,6 @@ use crate::pacifica::{
     TransferPrimaryReq,
 };
 use bytes::Bytes;
-use tonic::Status;
 use pacifica_rs::error::PacificaError;
 use pacifica_rs::model::LogEntryPayload;
 use pacifica_rs::rpc::message::{
@@ -15,6 +14,7 @@ use pacifica_rs::rpc::message::{
 use pacifica_rs::rpc::{ReplicaClient, RpcClientError, RpcServiceError};
 use pacifica_rs::storage::{GetFileRequest, GetFileResponse};
 use pacifica_rs::{LogEntry, LogId, ReplicaId, TypeConfig};
+use tonic::Status;
 
 mod grpc_client;
 mod grpc_server;
@@ -219,11 +219,27 @@ impl From<InstallSnapshotRep> for InstallSnapshotResponse {
 }
 
 impl From<ReplicaRecoverResponse> for ReplicaRecoverRep {
-    fn from(value: ReplicaRecoverResponse) -> Self {}
+    fn from(value: ReplicaRecoverResponse) -> Self {
+        match value {
+            ReplicaRecoverResponse::Success => ReplicaRecoverRep::default(),
+            ReplicaRecoverResponse::HigherTerm { term } => ReplicaRecoverRep::higher_term(term as u64),
+        }
+    }
 }
 
 impl From<ReplicaRecoverRep> for ReplicaRecoverResponse {
-    fn from(value: ReplicaRecoverRep) -> Self {}
+    fn from(value: ReplicaRecoverRep) -> Self {
+        let error = value.error;
+        match error {
+            Some(response_error) => match response_error.code {
+                response_error::CODE_HIGHER_TERM => ReplicaRecoverResponse::higher_term(value.term as usize),
+                _ => {
+                    panic!("unknown code.")
+                }
+            },
+            None => ReplicaRecoverResponse::success(),
+        }
+    }
 }
 
 impl From<TransferPrimaryResponse> for TransferPrimaryRep {
@@ -231,9 +247,7 @@ impl From<TransferPrimaryResponse> for TransferPrimaryRep {
 }
 
 impl From<TransferPrimaryRep> for TransferPrimaryResponse {
-    fn from(value: TransferPrimaryRep) -> Self {
-
-    }
+    fn from(value: TransferPrimaryRep) -> Self {}
 }
 
 impl From<GetFileResponse> for GetFileRep {
@@ -365,7 +379,6 @@ impl From<RpcResponse> for RpcResult<InstallSnapshotResponse> {
         Ok(rep)
     }
 }
-
 
 impl From<RpcResponse> for RpcResult<ReplicaRecoverResponse> {
     fn from(value: RpcResponse) -> Self {

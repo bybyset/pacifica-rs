@@ -3,7 +3,7 @@ use crate::core::pacifica_core::ReplicaCore;
 use crate::core::replica_msg::ApiMsg;
 use crate::core::replica_msg::ApiMsg::CommitOperation;
 use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
-use crate::error::PacificaError;
+use crate::error::{Fatal, PacificaError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
@@ -13,14 +13,12 @@ use crate::rpc::{ReplicaClient, ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::storage::GetFileService;
 use crate::type_config::alias::MpscUnboundedSenderOf;
-use crate::LogId;
 use crate::ReplicaId;
 use crate::ReplicaOption;
 use crate::StateMachine;
 use crate::TypeConfig;
-use std::ops::Deref;
+use crate::{LogId, ReplicaState};
 use std::sync::Arc;
-
 
 pub struct Replica<C, FSM>
 where
@@ -55,7 +53,7 @@ where
         snapshot_storage: C::SnapshotStorage,
         meta_client: C::MetaClient,
         replica_client: RC,
-    ) -> Result<Self, PacificaError<C>>
+    ) -> Result<Self, Fatal<C>>
     where
         FSM: StateMachine<C>,
         RC: ReplicaClient<C>,
@@ -83,10 +81,13 @@ where
         Ok(replica)
     }
 
-    pub async fn is_primary(&self) -> Result<bool, PacificaError<C>> {
-        Ok(true)
+    pub fn get_replica_state(&self) -> ReplicaState {
+        self.inner.replica_core.get_replica_state()
     }
 
+    /// A user-defined request(['C::Request']) is submitted, which is passed to
+    /// the user-defined ['StateMachine'] and on_commit is executed.
+    ///
     pub async fn commit(&self, request: C::Request) -> Result<C::Response, PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         let operation = Operation::new(request, result_sender)?;
@@ -95,8 +96,10 @@ where
         Ok(response)
     }
 
-    ///
-    /// 执行快照
+    /// Manually triggering snapshot.
+    /// Pacifica automatically verifies if save snapshot needs to be executed,
+    /// it will be passed to the user-defined ['StateMachine'],
+    /// and ['StateMachine::on_save_snapshot'] will be executed
     pub async fn snapshot(&self) -> Result<LogId, PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.inner
@@ -109,10 +112,20 @@ where
         Ok(log_id)
     }
 
+    ///
     pub async fn recover(&self) -> Result<(), PacificaError<C>> {
+        let (result_sender, rx) = C::oneshot();
+        self.inner
+            .tx_api
+            .send(ApiMsg::Recovery {
+                callback: result_sender,
+            })
+            .await?;
+        rx.await?;
         Ok(())
     }
 
+    ///
     pub async fn transfer_primary_to(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.inner
@@ -126,9 +139,8 @@ where
         Ok(())
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), PacificaError<C>> {
-        self.inner.replica_core.shutdown().await;
-
+    pub async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+        self.inner.replica_core.shutdown().await?;
         Ok(())
     }
 }
@@ -140,7 +152,7 @@ where
 {
     fn clone(&self) -> Replica<C, FSM> {
         Replica {
-            inner: Arc::clone(&self.inner)
+            inner: Arc::clone(&self.inner),
         }
     }
 }
@@ -173,7 +185,7 @@ where
     async fn handle_append_entries_request(
         &self,
         request: AppendEntriesRequest<C>,
-    ) -> Result<AppendEntriesResponse, RpcServiceError<C>> {
+    ) -> Result<AppendEntriesResponse, RpcServiceError> {
         self.inner.replica_core.handle_append_entries_request(request).await
     }
 
@@ -181,7 +193,7 @@ where
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
-    ) -> Result<TransferPrimaryResponse, RpcServiceError<C>> {
+    ) -> Result<TransferPrimaryResponse, RpcServiceError> {
         self.inner.replica_core.handle_transfer_primary_request(request).await
     }
 
@@ -189,7 +201,7 @@ where
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, RpcServiceError<C>> {
+    ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
         self.inner.replica_core.handle_replica_recover_request(request).await
     }
 
@@ -197,7 +209,7 @@ where
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, RpcServiceError<C>> {
+    ) -> Result<InstallSnapshotResponse, RpcServiceError> {
         self.inner.replica_core.handle_install_snapshot_request(request).await
     }
 }

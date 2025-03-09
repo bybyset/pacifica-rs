@@ -1,8 +1,8 @@
-use std::error::Error;
 use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
 use crate::{ReplicaState, StorageError, TypeConfig};
 use anyerror::AnyError;
+use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
@@ -34,12 +34,8 @@ where
 {
     #[error(transparent)]
     Fatal(#[from] Fatal<C>),
-
-    #[error(transparent)]
-    APIError,
     #[error(transparent)]
     UserFsmError(#[from] UserStateMachineError),
-
     #[error(transparent)]
     EncodeError(#[from] EncodeError<C::Request>),
     #[error(transparent)]
@@ -50,27 +46,25 @@ where
     LogManagerError(#[from] LogManagerError<C>),
     #[error(transparent)]
     ReplicaStateError(#[from] ReplicaStateError),
+    #[error(transparent)]
+    RpcClientError(#[from] RpcClientError),
+    #[error(transparent)]
+    HigherTermError(#[from] HigherTermError),
 }
-
 
 impl<C> Debug for PacificaError<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self )
+        write!(f, "{}", self)
     }
 }
 
-impl<C> Display for PacificaError<C>
-{
+impl<C> Display for PacificaError<C> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self )
+        write!(f, "{}", self)
     }
 }
 
-impl<C> Error for PacificaError<C>
-{
-
-
-}
+impl<C> Error for PacificaError<C> {}
 
 ///
 pub struct ReplicaStateError {
@@ -97,6 +91,10 @@ impl ReplicaStateError {
     pub fn secondary_but_not(actual_state: ReplicaState) -> ReplicaStateError {
         Self::new(vec![ReplicaState::Secondary], actual_state)
     }
+
+    pub fn candidate_but_not(actual_state: ReplicaState) -> ReplicaStateError {
+        Self::new(vec![ReplicaState::Candidate], actual_state)
+    }
 }
 
 impl Display for ReplicaStateError {
@@ -109,3 +107,33 @@ impl Display for ReplicaStateError {
     }
 }
 
+#[derive(Clone)]
+pub struct HigherTermError {
+    term: usize
+}
+
+impl HigherTermError {
+
+    pub fn new(term: usize) -> HigherTermError {
+        HigherTermError {
+            term
+        }
+    }
+
+}
+
+impl Debug for HigherTermError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "receive higher term {}", self.term)
+    }
+}
+
+impl Display for HigherTermError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for HigherTermError {
+    
+}

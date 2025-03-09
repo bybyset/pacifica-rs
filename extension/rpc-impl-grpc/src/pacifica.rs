@@ -90,6 +90,8 @@ pub struct ReplicaRecoverReq {
 pub struct ReplicaRecoverRep {
     #[prost(message, optional, tag = "1")]
     pub error: ::core::option::Option<ResponseError>,
+    #[prost(uint64, tag = "2")]
+    pub term: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TransferPrimaryReq {
@@ -106,6 +108,8 @@ pub struct TransferPrimaryReq {
 pub struct TransferPrimaryRep {
     #[prost(message, optional, tag = "1")]
     pub error: ::core::option::Option<ResponseError>,
+    #[prost(uint64, tag = "2")]
+    pub term: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetFileReq {

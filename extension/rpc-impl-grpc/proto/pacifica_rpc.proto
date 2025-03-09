@@ -63,6 +63,7 @@ message ReplicaRecoverReq {
 
 message ReplicaRecoverRep {
   ResponseError error = 1;
+  uint64 term = 2;
 }
 
 message TransferPrimaryReq {
@@ -74,6 +75,7 @@ message TransferPrimaryReq {
 
 message TransferPrimaryRep {
   ResponseError error = 1;
+  uint64 term = 2;
 }
 
 message GetFileReq {
