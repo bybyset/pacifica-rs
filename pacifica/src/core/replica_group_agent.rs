@@ -1,5 +1,4 @@
-use crate::config_cluster::MetaError;
-use crate::core::fsm::StateMachineError;
+use crate::config_cluster::{MetaClient, MetaError};
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;

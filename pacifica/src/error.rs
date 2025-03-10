@@ -1,6 +1,6 @@
 use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
-use crate::{ReplicaState, StorageError, TypeConfig};
+use crate::{LogId, ReplicaState, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
@@ -43,13 +43,18 @@ where
     #[error(transparent)]
     StorageError(#[from] StorageError),
     #[error(transparent)]
-    LogManagerError(#[from] LogManagerError<C>),
-    #[error(transparent)]
     ReplicaStateError(#[from] ReplicaStateError),
     #[error(transparent)]
     RpcClientError(#[from] RpcClientError),
     #[error(transparent)]
     HigherTermError(#[from] HigherTermError),
+    #[error(transparent)]
+    IllegalSnapshotError(#[from] IllegalSnapshotError),
+    #[error(transparent)]
+    CorruptedLogEntryError(#[from] CorruptedLogEntryError),
+    #[error(transparent)]
+    NotFoundLogEntryError(#[from] NotFoundLogEntry)
+
 }
 
 impl<C> Debug for PacificaError<C> {
@@ -109,7 +114,7 @@ impl Display for ReplicaStateError {
 
 #[derive(Clone)]
 pub struct HigherTermError {
-    term: usize
+    pub term: usize
 }
 
 impl HigherTermError {
@@ -137,3 +142,105 @@ impl Display for HigherTermError {
 impl Error for HigherTermError {
     
 }
+
+pub struct IllegalSnapshotError
+{
+    pub committed_log_id: LogId,
+    pub snapshot_log_id: LogId,
+}
+
+impl IllegalSnapshotError {
+    pub fn new(committed_log_id: LogId, snapshot_log_id: LogId) -> IllegalSnapshotError {
+        IllegalSnapshotError {
+            committed_log_id,
+            snapshot_log_id
+        }
+    }
+}
+
+impl Debug for IllegalSnapshotError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Illegal snapshot, last committed log_id is {} but snapshot log_id is {}", self.committed_log_id, self.snapshot_log_id)
+    }
+}
+
+impl Display for IllegalSnapshotError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for IllegalSnapshotError {
+
+
+}
+
+#[derive(Clone)]
+pub struct CorruptedLogEntryError {
+    pub expect: u64,
+    pub actual: u64
+}
+
+impl CorruptedLogEntryError {
+
+    pub fn new(expect: u64, actual: u64) -> CorruptedLogEntryError {
+        CorruptedLogEntryError {
+            expect,
+            actual
+        }
+
+    }
+}
+
+impl Debug for CorruptedLogEntryError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "corrupted LogEntry expect_check_sum: {}, actual_check_sum: {}", self.expect, self.actual)
+    }
+}
+
+impl Display for CorruptedLogEntryError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for CorruptedLogEntryError {
+
+
+}
+
+#[derive(Clone)]
+pub struct NotFoundLogEntry {
+    pub log_index: usize
+}
+
+impl NotFoundLogEntry {
+    pub fn new(log_index: usize) -> NotFoundLogEntry {
+        NotFoundLogEntry {
+            log_index
+        }
+    }
+}
+
+impl Debug for NotFoundLogEntry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Not Found LogEntry at index: {}", self.log_index)
+    }
+}
+
+impl Display for NotFoundLogEntry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for NotFoundLogEntry {
+
+
+}
+
+
+
+
+
+

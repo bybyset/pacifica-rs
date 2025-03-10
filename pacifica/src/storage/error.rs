@@ -1,5 +1,6 @@
 use anyerror::AnyError;
 use thiserror::Error;
+use crate::LogId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorVerb {
@@ -14,12 +15,14 @@ pub enum ErrorSubject {
     OpenWriter,
     OpenReader,
 
-    FlushLogWriter,
+    FlushWriter,
     AppendEntries { index: usize },
     TruncatePrefix { first_log_index_kept: usize },
     TruncateSuffix { last_log_index_kept: usize },
     ResetLogStorage { next_log_index: usize },
     GetLogEntry { log_index: usize },
+    ReadLogId,
+    WriteLogId { log_id: LogId},
 
     DownloadSnapshot {reader_id: usize},
 }
@@ -58,8 +61,8 @@ impl StorageError {
         Self::new(ErrorSubject::AppendEntries { index }, ErrorVerb::Write, source)
     }
 
-    pub fn flush_log_writer(source: impl Into<AnyError>) -> Self {
-        Self::new(ErrorSubject::FlushLogWriter, ErrorVerb::Write, source)
+    pub fn flush_writer(source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::FlushWriter, ErrorVerb::Write, source)
     }
 
     pub fn truncate_prefix(first_log_index_kept: usize, source: impl Into<AnyError>) -> Self {
@@ -86,7 +89,26 @@ impl StorageError {
         )
     }
 
+    pub fn read_log_id(source: impl Into<AnyError>) -> Self {
+        Self::new(
+            ErrorSubject::ReadLogId,
+            ErrorVerb::Read,
+            source,
+        )
+    }
+
+    pub fn write_log_id(log_id: LogId, source: impl Into<AnyError>) -> Self {
+        Self::new(
+            ErrorSubject::WriteLogId {log_id},
+            ErrorVerb::Write,
+            source,
+        )
+    }
+
     pub fn download_snapshot(reader_id: usize, source: impl Into<AnyError>) -> Self {
         Self::new(ErrorSubject::DownloadSnapshot {reader_id}, ErrorVerb::Write, source)
     }
+
+
+
 }

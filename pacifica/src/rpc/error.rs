@@ -114,9 +114,8 @@ pub enum Code {
     Fatal = 1,
     MetaError = 2,
     StorageError = 3,
-    LogManagerError = 4,
-    ReplicaStateError = 5,
-    EncodeError = 6,
+    ReplicaStateError = 4,
+    EncodeError = 5,
 }
 
 impl From<i32> for Code {
@@ -126,9 +125,8 @@ impl From<i32> for Code {
             1 => Code::Fatal,
             2 => Code::MetaError,
             3 => Code::StorageError,
-            4 => Code::LogManagerError,
-            5 => Code::ReplicaStateError,
-            6 => Code::EncodeError,
+            4 => Code::ReplicaStateError,
+            5 => Code::EncodeError,
             _ => Code::Unknown,
         }
     }
@@ -155,7 +153,6 @@ where
             PacificaError::EncodeError(..) => Self::encode_error(value),
             PacificaError::MetaError(..) => Self::meta_error(value),
             PacificaError::StorageError(..) => Self::storage_error(value),
-            PacificaError::LogManagerError(..) => Self::log_manager_error(value),
             PacificaError::ReplicaStateError(..) => Self::replica_state_error(value),
             _ => Self::unknown(value),
         }
@@ -184,9 +181,6 @@ impl RpcServiceError {
 
     pub fn storage_error(msg: impl Into<String>) -> Self {
         Self::new(Code::StorageError, msg)
-    }
-    pub fn log_manager_error(msg: impl Into<String>) -> Self {
-        Self::new(Code::LogManagerError, msg)
     }
     pub fn replica_state_error(msg: impl Into<String>) -> Self {
         Self::new(Code::ReplicaStateError, msg)

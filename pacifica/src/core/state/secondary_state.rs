@@ -43,7 +43,7 @@ where
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self<C> {
+    ) -> Self <C> {
         let grace_period_timeout = replica_option.grace_period_timeout();
         let grace_period = Leased::new(C::now(), grace_period_timeout.clone());
         let (tx_task, rx_task) = C::mpsc_unbounded();
@@ -101,7 +101,6 @@ where
                 }
                 _ => {}
             }
-
         }
         Ok(())
     }
@@ -136,18 +135,10 @@ where
         let replica_group = self.replica_group_agent.get_replica_group().await?;
         let cur_term = replica_group.term();
         if request.term < cur_term {
-            return Ok(TransferPrimaryResponse::higher_term(cur_term))
+            return Ok(TransferPrimaryResponse::higher_term(cur_term));
         }
-        let result = self.elect_self().await;
-        match result {
-            Ok(_) => {
-                Ok(TransferPrimaryResponse::Success)
-            }
-            Err(e) => {
-                Ok(TransferPrimaryResponse::Success)
-            }
-        }
-
+        self.elect_self().await?;
+        Ok(TransferPrimaryResponse::Success)
     }
 }
 
@@ -164,7 +155,7 @@ where
 
     async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
         self.grace_period_timer.shutdown();
-        todo!()
+        Ok(())
     }
 }
 
@@ -207,14 +198,14 @@ where
 
     ElectSelf {
         callback: ResultSender<C, (), MetaError>,
-    }
+    },
 }
 
 impl<C> TickFactory for Task<C>
 where
     C: TypeConfig,
 {
-    type Tick = Self<C>;
+    type Tick = Self <C>;
 
     fn new_tick() -> Self::Tick {
         Self::GracePeriodCheck

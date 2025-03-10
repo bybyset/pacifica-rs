@@ -51,6 +51,7 @@ message InstallSnapshotReq {
 
 message InstallSnapshotRep {
   ResponseError error = 1;
+  uint64 term = 2;
 }
 
 
@@ -86,10 +87,19 @@ message GetFileReq {
   uint64 count = 5;
 }
 
+message GetFileRepSuccess {
+  bytes data = 1;
+  bool eof = 2;
+}
+
+
 message GetFileRep {
-  ResponseError error = 1;
-  bytes data = 2;
-  bool eof = 3;
+  oneof response {
+      GetFileRepSuccess success = 1;
+      uint64 not_found_reader = 2;
+      string not_found_file = 3;
+      string read_error = 4;
+  }
 }
 
 

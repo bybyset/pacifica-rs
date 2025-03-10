@@ -398,6 +398,9 @@ where
         if request.version > version {
             let _ = self.core_notification.higher_version(request.version);
         }
+        if replica_group.is_primary(self.replica_id.clone()) {
+            return Err(RpcServiceError::replica_state_error("replica is primary"))
+        }
         let term = replica_group.term();
         if request.term < term {
             tracing::debug!("received lower term");

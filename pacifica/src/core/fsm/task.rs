@@ -1,7 +1,6 @@
-use crate::{LogId, TypeConfig};
-use crate::core::fsm::StateMachineError;
+use crate::TypeConfig;
 use crate::core::ResultSender;
-use crate::error::{Fatal, PacificaError};
+use crate::error::PacificaError;
 use crate::util::AutoClose;
 
 pub(crate) enum Task<C>
@@ -20,12 +19,12 @@ where
 
     SnapshotLoad {
         snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
-        callback: ResultSender<C, (), StateMachineError<C>>,
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 
     SnapshotSave {
         snapshot_writer: AutoClose<C::SnapshotStorage::Writer>,
-        callback: ResultSender<C, (), StateMachineError<C>>,
+        callback: ResultSender<C, (), PacificaError<C>>,
     },
 
     ReportError {

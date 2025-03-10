@@ -69,7 +69,7 @@ where
         match result {
             Err(e) => match e {
                 CheckConflictError::AppendCommitted => Ok(AppendEntriesResponse::conflict_log(last_log_index)),
-                CheckConflictError::LogManagerError(e) => Err(PacificaError::LogManagerError(e)),
+                CheckConflictError::LogManagerError(e) => Err(PacificaError::from(e)),
             },
             Ok(_) => Ok(AppendEntriesResponse::success()),
         }

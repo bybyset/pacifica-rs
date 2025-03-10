@@ -1,8 +1,10 @@
-use crate::pacifica::{AppendEntriesRep, ReplicaRecoverRep, ResponseError};
+use crate::pacifica::{AppendEntriesRep, GetFileRep, InstallSnapshotRep, ReplicaRecoverRep, ResponseError};
 
 pub const CODE_SUCCESS: i32 = 0;
 pub const CODE_HIGHER_TERM: i32 = 1;
 pub const CODE_CONFLICT_LOG: i32 = 2;
+
+
 
 
 impl ResponseError {
@@ -58,4 +60,21 @@ impl ReplicaRecoverRep {
         }
     }
     
+}
+
+impl InstallSnapshotRep {
+
+    pub fn higher_term(term: u64) -> InstallSnapshotRep {
+        let error = ResponseError::higher_term();
+        InstallSnapshotRep {
+            error: Some(error),
+            term,
+        }
+    }
+
+}
+
+
+impl GetFileRep {
+
 }

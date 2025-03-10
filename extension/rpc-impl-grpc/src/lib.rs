@@ -1,8 +1,8 @@
 use crate::pacifica::rpc_response::Response;
 use crate::pacifica::{
-    AppendEntriesRep, AppendEntriesReq, GetFileRep, GetFileReq, InstallSnapshotRep, InstallSnapshotReq, LogEntryProto,
-    LogIdProto, ReplicaIdProto, ReplicaRecoverRep, ReplicaRecoverReq, ResponseError, RpcResponse, TransferPrimaryRep,
-    TransferPrimaryReq,
+    get_file_rep, AppendEntriesRep, AppendEntriesReq, GetFileRep, GetFileRepSuccess, GetFileReq, InstallSnapshotRep,
+    InstallSnapshotReq, LogEntryProto, LogIdProto, ReplicaIdProto, ReplicaRecoverRep, ReplicaRecoverReq, ResponseError,
+    RpcResponse, TransferPrimaryRep, TransferPrimaryReq,
 };
 use bytes::Bytes;
 use pacifica_rs::error::PacificaError;
@@ -11,10 +11,9 @@ use pacifica_rs::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use pacifica_rs::rpc::{ReplicaClient, RpcClientError, RpcServiceError};
+use pacifica_rs::rpc::{ReplicaClient, RpcServiceError};
 use pacifica_rs::storage::{GetFileRequest, GetFileResponse};
 use pacifica_rs::{LogEntry, LogId, ReplicaId, TypeConfig};
-use tonic::Status;
 
 mod grpc_client;
 mod grpc_server;
@@ -211,11 +210,27 @@ impl From<AppendEntriesRep> for AppendEntriesResponse {
 }
 
 impl From<InstallSnapshotResponse> for InstallSnapshotRep {
-    fn from(value: InstallSnapshotResponse) -> Self {}
+    fn from(value: InstallSnapshotResponse) -> Self {
+        match value {
+            InstallSnapshotResponse::Success => InstallSnapshotRep::default(),
+            InstallSnapshotResponse::HigherTerm { term } => InstallSnapshotRep::higher_term(term as u64),
+        }
+    }
 }
 
 impl From<InstallSnapshotRep> for InstallSnapshotResponse {
-    fn from(value: InstallSnapshotRep) -> Self {}
+    fn from(value: InstallSnapshotRep) -> Self {
+        let error = value.error;
+        match error {
+            Some(response_error) => match response_error.code {
+                response_error::CODE_HIGHER_TERM => InstallSnapshotResponse::higher_term(value.term as usize),
+                _ => {
+                    panic!("unknown code.")
+                }
+            },
+            None => InstallSnapshotResponse::success(),
+        }
+    }
 }
 
 impl From<ReplicaRecoverResponse> for ReplicaRecoverRep {
@@ -251,11 +266,39 @@ impl From<TransferPrimaryRep> for TransferPrimaryResponse {
 }
 
 impl From<GetFileResponse> for GetFileRep {
-    fn from(value: GetFileResponse) -> Self {}
+    fn from(value: GetFileResponse) -> Self {
+        let response = match value {
+            GetFileResponse::Success { data, eof } => {
+                let success = GetFileRepSuccess { data, eof };
+                get_file_rep::Response::Success(success)
+            }
+            GetFileResponse::NotFoundReader { reader_id } => get_file_rep::Response::NotFoundReader(reader_id as u64),
+            GetFileResponse::NotFoundFile { filename } => get_file_rep::Response::NotFoundFile(filename),
+            GetFileResponse::ReadError { msg } => get_file_rep::Response::ReadError(msg),
+        };
+        GetFileRep {
+            response: Some(response),
+        }
+    }
 }
 
 impl From<GetFileRep> for GetFileResponse {
-    fn from(value: GetFileRep) -> Self {}
+    fn from(value: GetFileRep) -> Self {
+        let response = value.response;
+        match response {
+            Some(rep) => match rep {
+                get_file_rep::Response::Success(success) => GetFileResponse::success(success.data, success.eof),
+                get_file_rep::Response::NotFoundReader(reader_id) => {
+                    GetFileResponse::not_found_reader(reader_id as usize)
+                }
+                get_file_rep::Response::NotFoundFile(file) => GetFileResponse::not_found_file(file),
+                get_file_rep::Response::ReadError(msg) => GetFileResponse::read_error(msg),
+            },
+            None => {
+                panic!("unknown code.")
+            }
+        }
+    }
 }
 
 impl From<RpcServiceError> for ResponseError {

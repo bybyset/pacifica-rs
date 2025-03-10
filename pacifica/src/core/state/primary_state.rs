@@ -178,7 +178,7 @@ where
     pub(crate) async fn replica_recover(
         &self,
         request: ReplicaRecoverRequest<C>,
-    ) -> Result<ReplicaRecoverResponse, Fatal<C>> {
+    ) -> Result<ReplicaRecoverResponse, PacificaError<C>> {
         // 必要检查
         let replica_group = self.replica_group_agent.get_replica_group().await?;
         let cur_term = replica_group.term();

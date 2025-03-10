@@ -28,8 +28,6 @@ where
 
 pub enum InstallSnapshotResponse {
     Success,
-    Failure,
-
     HigherTerm { term: usize },
 }
 

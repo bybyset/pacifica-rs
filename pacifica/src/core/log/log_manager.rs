@@ -5,9 +5,7 @@ use crate::error::{Fatal, PacificaError};
 use crate::model::NOT_FOUND_INDEX;
 use crate::model::NOT_FOUND_TERM;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
-use crate::type_config::alias::{
-    JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
-};
+use crate::type_config::alias::{JoinErrorOf, JoinHandleOf, LogWriteOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::util::{send_result, Checksum};
 use crate::{LogEntry, LogId, LogStorage, ReplicaOption, StorageError, TypeConfig};
 use crate::{LogReader, LogWriter};
@@ -94,7 +92,7 @@ where
     /// 若发生异常，则终止写日志，并返回发生异常时的索引下标与异常(index,AnyError)
     async fn write_log_entries(
         &self,
-        writer: &mut C::LogStorage::Writer,
+        writer: &mut LogWriteOf<C>,
         log_entries: Vec<LogEntry>,
     ) -> Result<(), (usize, AnyError)> {
         for (index, log_entry) in log_entries.into_iter().enumerate() {
@@ -114,7 +112,7 @@ where
         let flush_result = writer.flush().await;
         if let Err(e) = flush_result {
             // There is no guarantee that logs will be consistently written to disk.
-            return Err(StorageError::flush_log_writer(e));
+            return Err(StorageError::flush_writer(e));
         }
         if let Err((index, e)) = write_result {
             // Write partial log error
@@ -262,12 +260,12 @@ where
     ///
     pub(crate) async fn get_log_entry_at(&self, log_index: usize) -> Result<LogEntry, LogManagerError<C>> {
         if log_index <= NOT_FOUND_INDEX {
-            return Err(LogManagerError::NotFound { log_index });
+            return Err(LogManagerError::not_found(log_index));
         }
         if log_index < self.first_log_index.load(Ordering::Relaxed)
             || log_index > self.last_log_index.load(Ordering::Relaxed)
         {
-            return Err(LogManagerError::NotFound { log_index });
+            return Err(LogManagerError::not_found(log_index));
         }
         let log_entry = self.get_log_entry_from_storage(log_index).await?;
 
@@ -275,15 +273,12 @@ where
             Some(log_entry) => {
                 if self.replica_option.log_entry_checksum_enable && log_entry.is_corrupted() {
                     return Err(
-                        LogManagerError::CorruptedLogEntry {
-                            expect: log_entry.check_sum.unwrap(),
-                            actual: log_entry.checksum(),
-                        }
+                        LogManagerError::corrupted_log_entry(log_entry.check_sum.unwrap(), log_entry.checksum())
                     )
                 };
                 Ok(log_entry)
             },
-            None => Err(LogManagerError::NotFound { log_index }),
+            None => Err(LogManagerError::not_found(log_index)),
         };
         result
     }

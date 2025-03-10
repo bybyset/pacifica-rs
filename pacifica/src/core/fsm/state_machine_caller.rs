@@ -1,21 +1,19 @@
 use crate::core::fsm::task::Task;
-use crate::core::fsm::{CommitResult, StateMachineError};
+use crate::core::fsm::CommitResult;
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;
 use crate::core::{CoreNotification, ResultSender};
-use crate::error::{Fatal, PacificaError};
-use crate::fsm::Entry;
+use crate::error::{Fatal, IllegalSnapshotError, PacificaError};
+use crate::fsm::{Entry, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::{SnapshotReader, SnapshotWriter};
-use crate::type_config::alias::{
-    JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
-};
+use crate::type_config::alias::{JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf, SnapshotWriteOf};
 use crate::util::{send_result, AutoClose, Checksum, Closeable};
-use crate::{LogId, StateMachine, TypeConfig};
+use crate::{LogId, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -63,7 +61,7 @@ where
         fsm_caller
     }
 
-    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), StateMachineError<C>> {
+    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), Fatal<C>> {
         let _ = self.tx_task.send(Task::CommitAt { log_index })?;
         Ok(())
     }
@@ -85,7 +83,7 @@ where
     pub(crate) async fn on_snapshot_save(
         &self,
         snapshot_writer: AutoClose<C::SnapshotStorage::Writer>,
-    ) -> Result<LogId, StateMachineError<C>> {
+    ) -> Result<LogId, PacificaError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotSave {
             snapshot_writer,
@@ -97,7 +95,7 @@ where
     pub(crate) async fn on_snapshot_load(
         &self,
         snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
-    ) -> Result<LogId, StateMachineError<C>> {
+    ) -> Result<LogId, PacificaError<C>> {
         let (callback, rx_result) = C::oneshot();
         let _ = self.tx_task.send(Task::SnapshotLoad {
             snapshot_reader,
@@ -165,10 +163,8 @@ where
             } => {
                 let result = self.handle_save_snapshot(snapshot_writer).await;
                 send_result(callback, result)?;
-            },
-            Task::ReportError {
-                fatal
-            } => {
+            }
+            Task::ReportError { fatal } => {
                 self.handle_report_error(fatal).await;
             }
         }
@@ -247,12 +243,11 @@ where
                         self.commit_entries(&entries_buffer, log_entry.log_id.clone())?;
                     }
                 }
-                Err(err) => {
+                Err(_) => {
                     //
                     break;
                 }
             }
-
         }
 
         if !entries_buffer.is_empty() {
@@ -264,26 +259,19 @@ where
 
     async fn handle_load_snapshot(
         &mut self,
-        snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
-    ) -> Result<LogId, StateMachineError<C>> {
-        let snapshot_log_id = snapshot_reader.read_snapshot_log_id().map_err(|e| {
-            StateMachineError::SnapshotLoad {
-                source: e
-            }
-        })?;
+        snapshot_reader: AutoClose<SnapshotReaderOf<C>>,
+    ) -> Result<LogId, PacificaError<C>> {
+        let snapshot_log_id = snapshot_reader.read_snapshot_log_id().map_err(|e| StorageError::read_log_id(e))?;
         let committed_log_id = self.committed_log_id.clone();
         if committed_log_id > snapshot_log_id {
             // error
-            return Err(StateMachineError::IllegalSnapshot {
-                committed_log_id,
-                snapshot_log_id,
-            });
+            return Err(IllegalSnapshotError::new(committed_log_id, snapshot_log_id).into());
         }
         let _ = self
             .fsm
             .on_load_snapshot(snapshot_reader.as_ref())
             .await
-            .map_err(|e| StateMachineError::SnapshotLoad { source: e })?;
+            .map_err(|e| UserStateMachineError::while_load_snapshot(e))?;
 
         self.committed_log_id = snapshot_log_id.clone();
         self.committed_log_index.store(snapshot_log_id.index, Ordering::Relaxed);
@@ -292,25 +280,15 @@ where
 
     async fn handle_save_snapshot(
         &self,
-        mut snapshot_writer: AutoClose<C::SnapshotStorage::Writer>
-    ) -> Result<LogId, StateMachineError<C>> {
+        mut snapshot_writer: AutoClose<SnapshotWriteOf<C>>,
+    ) -> Result<LogId, PacificaError<C>> {
         let snapshot_log_id = self.committed_log_id.clone();
-        snapshot_writer.write_snapshot_log_id(snapshot_log_id.clone()).map_err(|e| {
-            StateMachineError::SnapshotSave {
-                source: e
-            }
-        })?;
+        snapshot_writer
+            .write_snapshot_log_id(snapshot_log_id.clone())
+            .map_err(|e| StorageError::write_log_id(snapshot_log_id, e))?;
         let result = self.fsm.on_save_snapshot(&mut snapshot_writer).await;
-        let _ = result.map_err(|e| {
-            StateMachineError::SnapshotSave {
-                source: e
-            }
-        })?;
-        snapshot_writer.flush().map_err(|e| {
-            StateMachineError::SnapshotSave {
-                source: e
-            }
-        })?;
+        let _ = result.map_err(|e| UserStateMachineError::while_save_snapshot(e))?;
+        snapshot_writer.flush().map_err(|e| StorageError::flush_writer(e))?;
         Ok(snapshot_log_id)
     }
 }
@@ -339,7 +317,7 @@ where
         loop {
             futures::select_biased! {
                  _ = rx_shutdown.recv().fuse() => {
-                        tracing::info!("received shutdown signal.");
+                        tracing::info!("StateMachineCaller received shutdown signal.");
                         break;
                 }
 

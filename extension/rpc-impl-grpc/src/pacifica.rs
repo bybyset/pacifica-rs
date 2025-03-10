@@ -74,6 +74,8 @@ pub struct InstallSnapshotReq {
 pub struct InstallSnapshotRep {
     #[prost(message, optional, tag = "1")]
     pub error: ::core::option::Option<ResponseError>,
+    #[prost(uint64, tag = "2")]
+    pub term: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReplicaRecoverReq {
@@ -125,13 +127,30 @@ pub struct GetFileReq {
     pub count: u64,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetFileRep {
-    #[prost(message, optional, tag = "1")]
-    pub error: ::core::option::Option<ResponseError>,
-    #[prost(bytes = "vec", tag = "2")]
+pub struct GetFileRepSuccess {
+    #[prost(bytes = "vec", tag = "1")]
     pub data: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bool, tag = "3")]
+    #[prost(bool, tag = "2")]
     pub eof: bool,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetFileRep {
+    #[prost(oneof = "get_file_rep::Response", tags = "1, 2, 3, 4")]
+    pub response: ::core::option::Option<get_file_rep::Response>,
+}
+/// Nested message and enum types in `GetFileRep`.
+pub mod get_file_rep {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Response {
+        #[prost(message, tag = "1")]
+        Success(super::GetFileRepSuccess),
+        #[prost(uint64, tag = "2")]
+        NotFoundReader(u64),
+        #[prost(string, tag = "3")]
+        NotFoundFile(::prost::alloc::string::String),
+        #[prost(string, tag = "4")]
+        ReadError(::prost::alloc::string::String),
+    }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RpcResponse {

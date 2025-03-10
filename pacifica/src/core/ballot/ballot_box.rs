@@ -1,10 +1,10 @@
-use crate::core::ballot::error::BallotError;
 use crate::core::ballot::{ballot_box, Ballot};
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::{CaughtUpError, ResultSender, TaskSender};
 use crate::error::{Fatal, PacificaError};
+use crate::fsm::UserStateMachineError;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{
     JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
@@ -64,27 +64,27 @@ where
         primary_term: usize,
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
-    ) -> Result<usize, BallotError<C>> {
+    ) -> Result<usize, PacificaError<C>> {
         let ballot = Ballot::new_by_replica_group(replica_group);
-        let (callback, init_result_sender) = C::oneshot();
+        let (callback, rx) = C::oneshot();
         let task = Task::InitiateBallot {
             ballot,
             primary_term,
             request,
             result_sender,
-            init_result_sender,
+            init_result_sender: callback,
         };
         self.tx_task.send(task)?;
-        callback.await
+        rx.await
     }
 
     /// cancel ballot
-    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), BallotError<C>> {
+    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
         let pending_start_index = self.pending_index.load(Relaxed);
         let start_log_index = self.last_committed_index.load(Relaxed) + 1;
         let end_log_index = pending_start_index + self.ballot_queue.len() - 1;
         if start_log_index <= end_log_index {
-            return self.ballot_by(replica_id, start_log_index, end_log_index)
+            return self.ballot_by(replica_id, start_log_index, end_log_index);
         }
         Ok(())
     }
@@ -97,7 +97,7 @@ where
         replica_id: ReplicaId<C>,
         start_log_index: usize,
         end_log_index: usize,
-    ) -> Result<(), BallotError<C>> {
+    ) -> Result<(), PacificaError<C>> {
         assert!(start_log_index <= end_log_index);
         let pending_start_index = self.pending_index.load(Relaxed);
         let pending_end_index = pending_start_index + self.ballot_queue.len();
@@ -137,7 +137,11 @@ where
         Ok(())
     }
 
-    pub(crate) async fn caught_up(&self, replica_id: ReplicaId<C>, last_log_index: usize) -> Result<bool, CaughtUpError> {
+    pub(crate) async fn caught_up(
+        &self,
+        replica_id: ReplicaId<C>,
+        last_log_index: usize,
+    ) -> Result<bool, CaughtUpError> {
         let (tx, rx) = C::oneshot();
         self.tx_task.send(Task::CaughtUp {
             replica_id,
@@ -177,7 +181,7 @@ where
                 init_result_sender,
             } => {
                 let log_index = self.handle_initiate_ballot(ballot, primary_term, request, result_sender);
-                send_result(init_result_sender, Ok(log_index))?;
+                let _ = send_result(init_result_sender, Ok(log_index));
             }
             Task::CommitBallot { log_index } => {
                 self.handle_commit_ballot(log_index)?;
@@ -256,11 +260,9 @@ where
                 self.pending_index.fetch_add(1, Relaxed);
                 // 发送用户定义的异常
                 if let Some(result_sender) = ballot_context.result_sender {
-                    let send_result = result_sender.send(result.map_err(|e| PacificaError::UserFsmError { error: e }));
-
-                    if send_result.is_err() {
-                        // warn
-                    }
+                    let result =
+                        result.map_err(|e| PacificaError::UserFsmError(UserStateMachineError::while_commit_entry(e)));
+                    let _ = send_result(result_sender, result);
                 }
             } else {
                 // warn log
@@ -276,11 +278,11 @@ where
         if self.is_caught_up(last_log_index) {
             // 1. add secondary with meta
             if self.replica_group_agent.add_secondary(replica_id.clone()) {
-                return Err(CaughtUpError::MetaError)
+                return Err(CaughtUpError::MetaError);
             }
             // 2. recover ballot from last_log_index + 1.
             self.do_recover_ballot(replica_id, last_log_index + 1);
-            return Ok(true)
+            return Ok(true);
         }
         Ok(false)
     }
@@ -359,7 +361,6 @@ where
     }
 }
 
-
 enum Task<C>
 where
     C: TypeConfig,
@@ -370,7 +371,7 @@ where
         primary_term: usize,
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
-        init_result_sender: OneshotSenderOf<C, Result<usize, BallotError<C>>>,
+        init_result_sender: ResultSender<C, usize, PacificaError<C>>,
     },
 
     CommitBallot {
@@ -384,6 +385,6 @@ where
     CaughtUp {
         replica_id: ReplicaId<C>,
         last_log_index: usize,
-        callback: OneshotSenderOf<C, Result<bool, CaughtUpError>>,
+        callback: ResultSender<C, bool, CaughtUpError>,
     },
 }

@@ -45,6 +45,10 @@ impl GetFileResponse {
     pub fn not_found_file(filename: String) -> Self {
         GetFileResponse::NotFoundFile { filename }
     }
+
+    pub fn read_error(msg: String) -> Self {
+        GetFileResponse::ReadError { msg }
+    }
 }
 
 pub trait GetFileClient<C>

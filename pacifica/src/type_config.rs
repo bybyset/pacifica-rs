@@ -41,7 +41,7 @@ pub trait TypeConfig {
 
 pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
-    use crate::{AsyncRuntime, SnapshotStorage};
+    use crate::{AsyncRuntime, LogStorage, SnapshotStorage};
     use crate::TypeConfig;
 
     pub type AsyncRuntimeOf<C> = <C as TypeConfig>::AsyncRuntime;
@@ -78,4 +78,10 @@ pub mod alias {
     pub type SnapshotStorageOf<C> = <C as TypeConfig>::SnapshotStorage;
     pub type SnapshotReaderOf<C> = <SnapshotStorageOf<C> as SnapshotStorage<C>>::Reader;
     pub type SnapshotWriteOf<C> = <SnapshotStorageOf<C> as SnapshotStorage<C>>::Writer;
+
+    pub type LogStorageOf<C> = <C as TypeConfig>::LogStorage;
+    pub type LogReaderOf<C> = <LogStorageOf<C> as LogStorage>::Reader;
+    pub type LogWriteOf<C> = <LogStorageOf<C> as LogStorage>::Writer;
+
+
 }

@@ -90,7 +90,7 @@ where
         loop {
             futures::select_biased! {
             _ = rx_shutdown.recv().fuse() => {
-                        tracing::info!("received shutdown signal.");
+                        tracing::debug!("StatelessState received shutdown signal.");
                         break;
                 }
             task_msg = self.rx_task.recv().fuse() => {

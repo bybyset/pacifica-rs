@@ -22,7 +22,6 @@ use crate::core::snapshot::SnapshotExecutor;
 
 mod append_entries_handler;
 mod candidate_state;
-mod install_snapshot_handler;
 mod primary_state;
 mod secondary_state;
 mod stateless_state;
@@ -240,23 +239,6 @@ where
                 let error =
                     PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(self.get_replica_state()));
                 tracing::warn!("handle replica_recover_request, occurred an error: {}", error);
-                Err(error)
-            }
-        }
-    }
-
-    pub(crate) async fn handle_install_snapshot_request(
-        &self,
-        request: InstallSnapshotRequest<C>,
-    ) -> Result<InstallSnapshotResponse, PacificaError<C>> {
-        match self {
-            CoreState::Secondary { state } => {}
-            CoreState::Candidate { state } => {}
-            _ => {
-                let error = PacificaError::ReplicaStateError(ReplicaStateError::secondary_or_candidate_but_not(
-                    self.get_replica_state(),
-                ));
-                tracing::warn!("handle install_snapshot_request, occurred an error: {}", error);
                 Err(error)
             }
         }

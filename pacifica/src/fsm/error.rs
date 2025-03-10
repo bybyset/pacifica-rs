@@ -7,8 +7,14 @@ pub enum ErrorSubject {
     CommitEntry,
     /// while load snapshot
     LoadSnapshot,
+
+
     /// while save snapshot
     SaveSnapshot,
+
+
+
+
 }
 
 /// wrap error of user custom AnyError
