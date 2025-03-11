@@ -19,6 +19,7 @@ use crate::util::{send_result, RepeatedTimer, TickFactory};
 use crate::{LogEntry, LogId, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub(crate) struct PrimaryState<C, FSM>
 where
@@ -111,7 +112,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
         // 1 check replica state
         let replica_state = self.replica_group_agent.get_state(new_primary.clone()).await;
         if !replica_state.is_secondary() {
@@ -120,7 +121,7 @@ where
             )));
         }
         let last_log_index = self.log_manager.get_last_log_index();
-        self.replicator_group.transfer_primary(new_primary, last_log_index).await?;
+        self.replicator_group.transfer_primary(new_primary, last_log_index, timeout).await?;
         Ok(())
     }
 
@@ -139,11 +140,10 @@ where
         Ok(())
     }
 
-    async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), LifeCycleError<C>> {
+    async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), PacificaError<C>> {
         //init and append ballot box for the operation
-        let log_term = self.replica_group_agent.get_term();
         let replica_group = self.replica_group_agent.get_replica_group().await?;
-
+        let log_term = replica_group.term();
         let log_index_result = self
             .ballot_box
             .initiate_ballot(replica_group, log_term, operation.request, operation.callback)
@@ -162,6 +162,7 @@ where
         let append_result = self.log_manager.append_log_entries(vec![log_entry]).await;
         if let Err(e) = append_result {
             // send error
+
         } else {
             // replicate log entries
             self.replicator_group.continue_replicate_log()?;

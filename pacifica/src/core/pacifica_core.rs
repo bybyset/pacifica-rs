@@ -128,7 +128,9 @@ where
                 let result = self.snapshot_executor.save_snapshot().await;
                 let _ = send_result(callback, result);
             }
-            ApiMsg::TransferPrimary { new_primary, callback } => {
+            ApiMsg::TransferPrimary { new_primary,
+                timeout,
+                callback } => {
                 let result = self.handle_transfer_primary(new_primary).await;
                 let _ = send_result(callback, result);
             }
@@ -189,8 +191,13 @@ where
     }
 
     #[inline]
-    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
-        self.core_state.transfer_primary(new_primary).await
+    async fn handle_transfer_primary(&mut self, new_primary: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
+        let result = self.core_state.transfer_primary(new_primary, timeout).await;
+        if result.is_ok() {
+            let _ = self.handle_state_change();
+        }
+        result
+
     }
 
     #[inline]

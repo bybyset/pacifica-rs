@@ -18,6 +18,7 @@ use crate::rpc::RpcServiceError;
 use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
+use std::time::Duration;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::util::send_result;
 
@@ -198,9 +199,9 @@ where
 
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
         match self {
-            CoreState::Primary { state } => state.transfer_primary(new_primary).await,
+            CoreState::Primary { state } => state.transfer_primary(new_primary, timeout).await,
             _ => Err(PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
                 self.get_replica_state(),
             ))),

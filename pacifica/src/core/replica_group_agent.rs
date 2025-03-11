@@ -248,18 +248,6 @@ where
         self.current_id.clone()
     }
 
-    pub(crate) fn primary(&self) -> ReplicaId<C> {
-        todo!()
-    }
-
-    pub(crate) fn secondaries(&self) -> Vec<ReplicaId<C>> {
-        todo!()
-    }
-
-    pub(crate) fn get_version(&self) -> usize {
-        todo!()
-    }
-
     pub(crate) fn get_term(&self) -> usize {
         todo!()
     }

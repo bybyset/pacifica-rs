@@ -7,19 +7,17 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
-use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, TaskSender};
-use crate::error::{Fatal, LifeCycleError, PacificaError};
-use crate::rpc::message::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-};
+use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
+use crate::error::{Fatal, HigherTermError, LifeCycleError, PacificaError};
+use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::rpc::{ReplicaClient, RpcClientError, RpcOption};
-use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
     InstantOf, JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf,
     OneshotSenderOf,
 };
-use crate::util::{Instant, RepeatedTimer, TickFactory};
+use crate::util::{send_result, Instant, RepeatedTimer, TickFactory};
 use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::cmp::max;
@@ -131,6 +129,38 @@ where
         self.task_sender.send(Task::NotifyMoreLog)
     }
 
+    pub(crate) async fn transfer_primary(
+        &self,
+        last_log_index: usize,
+        timeout: Duration,
+    ) -> Result<(), PacificaError<C>> {
+        let deadline = C::now() + timeout;
+        while C::now() < deadline {
+            let result = self.do_transfer_primary(last_log_index, timeout).await;
+            match result {
+                Err(e) => match e {
+                    TransferPrimaryError::UnReachedError { .. } => {
+                        C::sleep_until(C::now() + Duration::from_millis(100));
+                        continue;
+                    }
+                    TransferPrimaryError::PacificaError(e) => return Err(e),
+                },
+                Ok(()) => return Ok(()),
+            }
+        }
+        Err(PacificaError::ApiTimeout)
+    }
+
+    async fn do_transfer_primary(&self, last_log_index: usize, timeout: Duration) -> Result<(), TransferPrimaryError<C>> {
+        let (callback, rx_result) = C::oneshot();
+        self.task_sender.send(Task::TransferPrimary {
+            last_log_index,
+            timeout,
+            callback,
+        })?;
+        rx_result.await
+    }
+
     ///
     pub(crate) fn get_type(&self) -> ReplicatorType {
         self.replicator_type
@@ -193,6 +223,14 @@ where
             Task::NotifyMoreLog => {
                 self.handle_notify_more_log().await?;
             }
+            Task::TransferPrimary {
+                last_log_index,
+                timeout,
+                callback,
+            } => {
+                let result = self.handle_transfer_primary(last_log_index, timeout).await;
+                let _ = send_result(callback, result);
+            }
         }
         Ok(())
     }
@@ -235,6 +273,42 @@ where
         Ok(())
     }
 
+    async fn handle_transfer_primary(&mut self, last_log_index: usize, timeout: Duration) -> Result<(), TransferPrimaryError<C>> {
+        let cur_log_index = self.next_log_index.load(Ordering::Relaxed) - 1;
+        if cur_log_index < last_log_index {
+            Err(TransferPrimaryError::UnReachedError {
+                cur_log_index,
+                last_log_index
+            })
+        } else {
+            self.do_send_transfer_primary_request(timeout).await.map_err(|e|{
+                TransferPrimaryError::PacificaError(e)
+            })?;
+            Ok(())
+        }
+    }
+
+    async fn do_send_transfer_primary_request(&self, timeout: Duration) -> Result<(), PacificaError<C>> {
+        let replica_group = self.replica_group_agent.get_replica_group().await?;
+        let term = replica_group.term();
+        let version = replica_group.version();
+        let request = TransferPrimaryRequest::new(self.target_id.clone(), term, version);
+        let mut rpc_option = RpcOption::default();
+        rpc_option.timeout = timeout;
+        let response = self.replica_client.transfer_primary(self.target_id.clone(), request, rpc_option).await.map_err(|e| {
+            PacificaError::RpcClientError(e)
+        })?;
+        match response {
+            TransferPrimaryResponse::Success => {
+                Ok(())
+            }
+            TransferPrimaryResponse::HigherTerm {term} => {
+                Err(PacificaError::HigherTermError(HigherTermError::new(term)))
+            }
+        }
+
+    }
+
     /// send empty entries request, it may be triggered by a Probe or a Heartbeat.
     /// install snapshot if not found LogEntry.
     async fn send_empty_entries(&mut self, is_probe: bool) -> Result<(), PacificaError<C>> {
@@ -259,8 +333,7 @@ where
 
     async fn send_log_entries(&mut self) -> Result<(), PacificaError<C>> {
         let prev_log_index = self.next_log_index.load(Ordering::Relaxed) - 1;
-        let append_log_entries_request =
-            self.fill_common_append_entries_request(prev_log_index).await?;
+        let append_log_entries_request = self.fill_common_append_entries_request(prev_log_index).await?;
         match append_log_entries_request {
             None => {
                 // need install snapshot
@@ -291,8 +364,10 @@ where
                 let reader_id = snapshot_reader
                     .generate_reader_id()
                     .map_err(|e| Fatal::StorageError(StorageError::generate_reader_id(e)))?;
-                let term = self.replica_group_agent.get_term();
-                let version = self.replica_group_agent.get_version();
+                let replica_group =
+                    self.replica_group_agent.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+                let term = replica_group.term();
+                let version = replica_group.version();
                 let primary_id = self.primary_id.clone();
                 let install_snapshot_request =
                     InstallSnapshotRequest::new(primary_id, term, version, snapshot_log_id, reader_id);
@@ -318,8 +393,10 @@ where
             Ok(prev_log_term) => {
                 let prev_log_id = LogId::new(prev_log_term, prev_log_index);
                 let committed_index = self.fsm_caller.get_committed_log_index();
-                let term = self.replica_group_agent.get_term();
-                let version = self.replica_group_agent.get_version();
+                let replica_group =
+                    self.replica_group_agent.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+                let term = replica_group.term();
+                let version = replica_group.version();
                 let primary_id = self.primary_id.clone();
                 let request =
                     AppendEntriesRequest::with_no_entries(primary_id, term, version, committed_index, prev_log_id);
@@ -374,7 +451,10 @@ where
         self.waiting_more_log = true
     }
 
-    async fn do_send_install_snapshot_request(&mut self, request: InstallSnapshotRequest<C>) -> Result<(), PacificaError<C>> {
+    async fn do_send_install_snapshot_request(
+        &mut self,
+        request: InstallSnapshotRequest<C>,
+    ) -> Result<(), PacificaError<C>> {
         let target_id = self.target_id.clone();
         let rpc_option = RpcOption::default();
         let snapshot_log_index = request.snapshot_log_id.index;
@@ -600,17 +680,27 @@ enum Task<C>
 where
     C: TypeConfig,
 {
-    Heartbeat { timing: InstantOf<C> },
+    Heartbeat {
+        timing: InstantOf<C>,
+    },
 
     Probe,
 
-    Block { timeout: Duration },
+    Block {
+        timeout: Duration,
+    },
 
     AppendLogEntries,
 
     InstallSnapshot,
 
     NotifyMoreLog,
+
+    TransferPrimary {
+        last_log_index: usize,
+        timeout: Duration,
+        callback: ResultSender<C, (), TransferPrimaryError<C>>,
+    },
 }
 
 impl<C> TickFactory for Task<C>
@@ -627,4 +717,13 @@ where
 struct AppendEntriesContext {
     prev_log_index: usize,
     entry_num: usize,
+}
+
+enum TransferPrimaryError<C> {
+    UnReachedError {
+        cur_log_index: usize,
+        last_log_index: usize,
+    },
+
+    PacificaError(PacificaError<C>),
 }

@@ -1,3 +1,4 @@
+use std::time::Duration;
 use crate::core::operation::Operation;
 use crate::{LogId, ReplicaId, TypeConfig};
 use crate::core::ResultSender;
@@ -17,6 +18,7 @@ where
 
     TransferPrimary {
         new_primary: ReplicaId<C>,
+        timeout: Duration,
         callback: ResultSender<C, (), PacificaError<C>>,
     },
 

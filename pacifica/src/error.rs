@@ -103,6 +103,10 @@ where
     CorruptedLogEntryError(#[from] CorruptedLogEntryError),
     #[error(transparent)]
     NotFoundLogEntryError(#[from] NotFoundLogEntry),
+    #[error("Not Found Replicator")]
+    NotFoundReplicator,
+    #[error("Api timeout")]
+    ApiTimeout,
 }
 
 impl<C> Debug for PacificaError<C> {

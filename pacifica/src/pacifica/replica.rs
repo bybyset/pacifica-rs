@@ -9,7 +9,7 @@ use crate::rpc::message::{
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
     TransferPrimaryResponse,
 };
-use crate::rpc::{ReplicaClient, ReplicaService, RpcServiceError};
+use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::storage::GetFileService;
 use crate::type_config::alias::MpscUnboundedSenderOf;
@@ -19,6 +19,7 @@ use crate::StateMachine;
 use crate::TypeConfig;
 use crate::{LogId, ReplicaState};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct Replica<C, FSM>
 where
@@ -45,18 +46,17 @@ where
     /// StateMachine
     /// LogStorage  LogEntryCodec SnapshotStorage
     /// MetaClient ReplicaClient
-    pub async fn new<FSM, RC>(
+    pub async fn new<FSM>(
         replica_id: ReplicaId<C>,
         replica_option: ReplicaOption,
         fsm: FSM,
         log_storage: C::LogStorage,
         snapshot_storage: C::SnapshotStorage,
         meta_client: C::MetaClient,
-        replica_client: RC,
+        replica_client: C::ReplicaClient,
     ) -> Result<Self, LifeCycleError<C>>
     where
         FSM: StateMachine<C>,
-        RC: ReplicaClient<C>,
     {
         let (tx_api, rx_api) = C::mpsc_unbounded();
         let replica_core = ReplicaCore::new(
@@ -125,13 +125,19 @@ where
         Ok(())
     }
 
-    ///
-    pub async fn transfer_primary_to(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+    /// transfer primary to ['replica_id'] and default timeout: 120s
+    pub async fn transfer_primary(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+        self.transfer_primary_with_timeout(replica_id, Duration::from_secs(120))
+    }
+
+    /// transfer primary to ['replica_id'] with ['timeout']
+    pub async fn transfer_primary_with_timeout(&self, replica_id: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.inner
             .tx_api
             .send(ApiMsg::TransferPrimary {
                 new_primary: replica_id,
+                timeout,
                 callback: result_sender,
             })
             .await?;

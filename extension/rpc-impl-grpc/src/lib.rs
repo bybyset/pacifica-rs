@@ -258,11 +258,27 @@ impl From<ReplicaRecoverRep> for ReplicaRecoverResponse {
 }
 
 impl From<TransferPrimaryResponse> for TransferPrimaryRep {
-    fn from(value: TransferPrimaryResponse) -> Self {}
+    fn from(value: TransferPrimaryResponse) -> Self {
+        match value {
+            TransferPrimaryResponse::Success => TransferPrimaryRep::default(),
+            TransferPrimaryResponse::HigherTerm { term } => TransferPrimaryRep::higher_term(term as u64),
+        }
+    }
 }
 
 impl From<TransferPrimaryRep> for TransferPrimaryResponse {
-    fn from(value: TransferPrimaryRep) -> Self {}
+    fn from(value: TransferPrimaryRep) -> Self {
+        let error = value.error;
+        match error {
+            Some(response_error) => match response_error.code {
+                response_error::CODE_HIGHER_TERM => TransferPrimaryResponse::higher_term(value.term as usize),
+                _ => {
+                    panic!("unknown code.")
+                }
+            },
+            None => TransferPrimaryResponse::success(),
+        }
+    }
 }
 
 impl From<GetFileResponse> for GetFileRep {
