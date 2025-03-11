@@ -3,7 +3,7 @@ use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::{CaughtUpError, ResultSender, TaskSender};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::fsm::UserStateMachineError;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{
@@ -152,7 +152,7 @@ where
     }
 
     /// announce commit result and remove ballot queue
-    pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
+    pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError<C>> {
         let announce_result = Task::AnnounceBallots { commit_result };
         self.submit_task(announce_result)?;
         Ok(())
@@ -171,7 +171,7 @@ where
         last_log_index > self.get_last_committed_index()
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::InitiateBallot {
                 ballot,
@@ -200,7 +200,7 @@ where
         Ok(())
     }
 
-    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), Fatal<C>> {
+    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), LifeCycleError<C>> {
         let last_committed_index = self.last_committed_index.load(Relaxed);
         let pending_log_index = self.pending_index.load(Relaxed);
         if end_log_index_include > last_committed_index {
@@ -249,7 +249,7 @@ where
         self.pending_index.load(Relaxed) + self.ballot_queue.len()
     }
 
-    fn handle_commit_result(&mut self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
+    fn handle_commit_result(&mut self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError<C>> {
         //
         let start_log_index = commit_result.start_log_index;
         let pending_index = self.pending_index.load(Relaxed);
@@ -318,15 +318,15 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         //
         while let Some(ballot_context) = self.ballot_queue.pop_front() {
             if let Some(result_sender) = ballot_context.result_sender {
-                let _ = result_sender.send(Err(PacificaError::Fatal(Fatal::Shutdown)));
+                let _ = result_sender.send(Err(PacificaError::Shutdown));
             }
         }
         Ok(true)
@@ -338,7 +338,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() => {

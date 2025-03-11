@@ -1,7 +1,7 @@
 use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::log::{LogManagerError, Task};
 use crate::core::task_sender::TaskSender;
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::model::NOT_FOUND_INDEX;
 use crate::model::NOT_FOUND_TERM;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
@@ -46,7 +46,7 @@ where
         }
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::AppendLogEntries { log_entries, callback } => {
                 let result = self.handle_append_log_entries(log_entries).await;
@@ -235,12 +235,12 @@ where
         Ok(())
     }
 
-    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), Fatal<C>> {
+    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), LifeCycleError<C>> {
         self.tx_task.send(Task::TruncateSuffix { last_log_index_kept })?;
         Ok(())
     }
 
-    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), Fatal<C>> {
+    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), LifeCycleError<C>> {
         self.tx_task.send(Task::TruncatePrefix { first_log_index_kept })?;
         Ok(())
     }
@@ -339,23 +339,23 @@ impl<C> Lifecycle<C> for LogManager<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         let log_reader = self.log_storage.open_reader().await;
-        let log_reader = log_reader.map_err(|e| Fatal::StartupError(e))?;
+        let log_reader = log_reader.map_err(|e| LifeCycleError::StartupError(e))?;
         // set first log index
-        let first_log_index = log_reader.get_first_log_index().await.map_err(|e| Fatal::StartupError(e));
+        let first_log_index = log_reader.get_first_log_index().await.map_err(|e| LifeCycleError::StartupError(e));
         if let Some(first_log_index) = first_log_index {
             self.last_log_index.store(first_log_index, Ordering::Relaxed);
         }
         // set last log index
-        let last_log_index = log_reader.get_last_log_index().await.map_err(|e| Fatal::StartupError(e));
+        let last_log_index = log_reader.get_last_log_index().await.map_err(|e| LifeCycleError::StartupError(e));
         if let Some(last_log_index) = last_log_index {
             self.last_log_index.store(last_log_index, Ordering::Relaxed);
         }
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         todo!()
     }
 }
@@ -364,7 +364,7 @@ impl<C> Component<C> for LogManager<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() => {

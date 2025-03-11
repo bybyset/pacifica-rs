@@ -9,7 +9,7 @@ use crate::core::state::primary_state::PrimaryState;
 use crate::core::state::secondary_state::SecondaryState;
 use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
-use crate::error::{Fatal, PacificaError, ReplicaStateError};
+use crate::error::{LifeCycleError, PacificaError, ReplicaStateError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
@@ -19,6 +19,7 @@ use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
 use crate::core::snapshot::SnapshotExecutor;
+use crate::util::send_result;
 
 mod append_entries_handler;
 mod candidate_state;
@@ -161,18 +162,21 @@ where
         state
     }
 
-    pub(crate) fn commit_operation(&self, operation: Operation<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn commit_operation(&self, operation: Operation<C>) {
         match self {
             CoreState::Primary { state: primary } => {
-                primary.commit(operation)?;
-                Ok(())
+                primary.commit(operation);
             }
             _ => {
                 let error = PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
-                    self.get_replica_state(),
+                    self.get_replica_state()
                 ));
-                tracing::warn!("commit_operation, occurred an error: {}", error);
-                Err(error)
+                match operation.callback {
+                    Some(callback) => {
+                        let _ = send_result(callback, Err(error));
+                    }
+                    None => {}
+                }
             }
         }
     }
@@ -265,7 +269,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         match self {
             CoreState::Primary { state: primary } => primary.startup().await,
             CoreState::Secondary { state } => state.startup().await,
@@ -275,7 +279,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         match self {
             CoreState::Primary { state: primary } => primary.shutdown().await,
             CoreState::Secondary { state } => state.shutdown().await,

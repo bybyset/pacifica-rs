@@ -111,7 +111,7 @@ impl Error for RpcClientError {
 #[derive(Copy, Clone, Debug)]
 pub enum Code {
     Unknown = 0,
-    Fatal = 1,
+    Shutdown = 1,
     MetaError = 2,
     StorageError = 3,
     ReplicaStateError = 4,
@@ -122,7 +122,7 @@ impl From<i32> for Code {
     fn from(value: i32) -> Self {
         match value {
             0 => Code::Unknown,
-            1 => Code::Fatal,
+            1 => Code::Shutdown,
             2 => Code::MetaError,
             3 => Code::StorageError,
             4 => Code::ReplicaStateError,
@@ -149,7 +149,7 @@ where
 {
     fn from(value: PacificaError<C>) -> Self {
         match value {
-            PacificaError::Fatal(..) => Self::fatal(value),
+            PacificaError::Shutdown => Self::shutdown(value),
             PacificaError::EncodeError(..) => Self::encode_error(value),
             PacificaError::MetaError(..) => Self::meta_error(value),
             PacificaError::StorageError(..) => Self::storage_error(value),
@@ -171,8 +171,8 @@ impl RpcServiceError {
         Self::new(Code::Unknown, msg)
     }
 
-    pub fn fatal(msg: impl Into<String>) -> Self {
-        Self::new(Code::Fatal, msg)
+    pub fn shutdown(msg: impl Into<String>) -> Self {
+        Self::new(Code::Shutdown, msg)
     }
 
     pub fn meta_error(msg: impl Into<String>) -> Self {

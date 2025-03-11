@@ -5,7 +5,7 @@ use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;
 use crate::core::{CoreNotification, ResultSender};
-use crate::error::{Fatal, IllegalSnapshotError, PacificaError};
+use crate::error::{LifeCycleError, IllegalSnapshotError, PacificaError, Fatal};
 use crate::fsm::{Entry, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
@@ -30,7 +30,7 @@ where
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     core_notification: Arc<CoreNotification<C>>,
 
-    fatal: Option<PacificaError<C>>,
+    fatal: Option<Fatal>,
 
     tx_task: TaskSender<C, Task<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
@@ -61,7 +61,7 @@ where
         fsm_caller
     }
 
-    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), Fatal<C>> {
+    pub(crate) fn commit_at(&self, log_index: usize) -> Result<(), PacificaError<C>> {
         let _ = self.tx_task.send(Task::CommitAt { log_index })?;
         Ok(())
     }
@@ -71,7 +71,7 @@ where
         start_log_index: usize,
         primary_term: usize,
         requests: Vec<Option<C::Request>>,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), PacificaError<C>> {
         self.tx_task.send(Task::CommitBatch {
             start_log_index,
             primary_term,
@@ -108,11 +108,18 @@ where
         self.committed_log_index.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn report_fatal(&self, fatal: Fatal) -> Result<(), PacificaError<C>> {
+        self.tx_task.send(Task::ReportError {
+            fatal
+        })?;
+        Ok(())
+    }
+
     fn notification_send_commit_result(
         &self,
         start_log_index: usize,
         commit_result: Vec<Result<C::Response, AnyError>>,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), LifeCycleError<C>> {
         let commit_result = CommitResult {
             start_log_index,
             commit_result,
@@ -122,7 +129,7 @@ where
     }
 
     /// 提交一批，并设置提交点： committed_log_id
-    async fn commit_entries(&mut self, entries: &Vec<Entry<C>>, commit_point: LogId) -> Result<(), Fatal<C>> {
+    async fn commit_entries(&mut self, entries: &Vec<Entry<C>>, commit_point: LogId) -> Result<(), LifeCycleError<C>> {
         if !entries.is_empty() {
             let start_log_index = entries.first().unwrap().log_id.index;
             assert_eq!(start_log_index, self.committed_log_index.load(Ordering::Relaxed) + 1);
@@ -140,7 +147,7 @@ where
         self.committed_log_id = committed_log_id;
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::CommitAt { log_index } => self.handle_commit_at(log_index).await?,
             Task::CommitBatch {
@@ -172,7 +179,8 @@ where
         Ok(())
     }
 
-    async fn handle_report_error(&mut self, fatal: PacificaError<C>) {
+    async fn handle_report_error(&mut self, fatal: Fatal) {
+        tracing::error!("report error {}", fatal);
         if self.fatal.is_some() {
             // error
             return;
@@ -186,7 +194,7 @@ where
         primary_term: usize,
         start_log_index: usize,
         requests: Vec<Option<C::Request>>,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), LifeCycleError<C>> {
         // case 1: no decode request bytes. eg: From Primary.
         let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
         assert_eq!(start_log_index, committed_log_index + 1);
@@ -209,7 +217,7 @@ where
         self.commit_entries(&entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
         Ok(())
     }
-    async fn handle_commit_at(&mut self, log_index: usize) -> Result<(), Fatal<C>> {
+    async fn handle_commit_at(&mut self, log_index: usize) -> Result<(), LifeCycleError<C>> {
         // case 2: need to decode request.
         let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
         if log_index <= committed_log_index {
@@ -298,11 +306,11 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         self.fsm.on_shutdown().await;
         Ok(true)
     }
@@ -313,7 +321,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                  _ = rx_shutdown.recv().fuse() => {

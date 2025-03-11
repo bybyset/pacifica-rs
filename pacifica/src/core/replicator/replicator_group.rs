@@ -8,7 +8,7 @@ use crate::core::replicator::replicator_type::ReplicatorType;
 use crate::core::replicator::Replicator;
 use crate::core::snapshot::{SnapshotExecutor};
 use crate::core::{CaughtUpError, CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{ConnectError, LifeCycleError, PacificaError, RpcClientError};
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf, TimeoutErrorOf, TimeoutOf};
@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+use anyerror::AnyError;
 
 pub(crate) struct ReplicatorGroup<C, FSM>
 where
@@ -75,7 +76,7 @@ where
         target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
         check_conn: bool,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), PacificaError<C>> {
         // check if it already exists
         let replicator = self.replicators.get(&target_id);
         let replicator = {
@@ -94,9 +95,12 @@ where
         };
 
         // check connect
-        if check_conn && !self.replica_client.check_connected(&target_id, true) {
-            //ERROR
-        };
+        if check_conn {
+            let conn = self.replica_client.check_connected(&target_id, true).await?;
+            if !conn {
+                return Err(PacificaError::ConnectError(ConnectError::DisConnected))
+            }
+        }
         if replicator.is_none() {
             // add replicator
             self.do_add_replicator(target_id, replicator_type).await?;
@@ -129,7 +133,7 @@ where
         result
     }
 
-    pub(crate) fn continue_replicate_log(&self) -> Result<(), Fatal<C>>{
+    pub(crate) fn continue_replicate_log(&self) -> Result<(), LifeCycleError<C>>{
         for replicator in self.replicators.values() {
             replicator.notify_more_log()?;
         }
@@ -154,11 +158,11 @@ where
         result
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, last_log_index: usize) -> Result<(), ()>{
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, last_log_index: usize) -> Result<(), PacificaError<C>>{
         let replicator = self.replicators.get(&new_primary);
         match replicator {
             Some(replicator) => {
-                replicator.
+                replicator.t
 
 
             }
@@ -189,7 +193,7 @@ where
         &self,
         target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), LifeCycleError<C>> {
         let (callback, rx) = C::oneshot();
         let _ = self.task_sender.send(Task::AddReplicator {
             target_id,
@@ -262,7 +266,7 @@ where
         &mut self,
         target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), LifeCycleError<C>> {
         if !self.replicators.contains_key(&target_id) {
             let mut replicator = self.new_replicator(target_id.clone(), replicator_type);
             replicator.startup().await?;
@@ -287,12 +291,12 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
 
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         Ok(())
     }
 }
@@ -302,7 +306,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                  _ = rx_shutdown.recv().fuse() => {
@@ -334,11 +338,11 @@ where
     AddReplicator {
         target_id: ReplicaId<C>,
         replicator_type: ReplicatorType,
-        callback: ResultSender<C, (), Fatal<C>>,
+        callback: ResultSender<C, (), LifeCycleError<C>>,
     },
     RemoveReplicator {
         remove_id: ReplicaId<C>,
-        callback: ResultSender<C, Option<Replicator<C, FSM>>, Fatal<C>>,
+        callback: ResultSender<C, Option<Replicator<C, FSM>>, LifeCycleError<C>>,
     },
 
 }

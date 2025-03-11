@@ -5,7 +5,7 @@ use crate::core::notification_msg::NotificationMsg;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
 use crate::core::{CoreNotification, ResultSender, TaskSender};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, TransferPrimaryRequest, TransferPrimaryResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
@@ -72,7 +72,7 @@ where
         self.grace_period.touch(C::now());
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::GracePeriodCheck => {
                 self.check_grace_period()?;
@@ -91,7 +91,7 @@ where
         Ok(())
     }
 
-    fn check_grace_period(&self) -> Result<(), Fatal<C>> {
+    fn check_grace_period(&self) -> Result<(), LifeCycleError<C>> {
         if self.grace_period.is_expired(C::now()) {
             // 检测到主副本故障，竞争推选自己做为新的主副本
             let result = self.handle_elect_self();
@@ -147,13 +147,13 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         self.grace_period_timer.turn_on();
 
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         self.grace_period_timer.shutdown();
         Ok(())
     }
@@ -164,7 +164,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
             _ = rx_shutdown.recv().fuse() => {

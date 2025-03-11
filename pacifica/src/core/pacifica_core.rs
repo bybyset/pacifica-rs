@@ -9,7 +9,7 @@ use crate::core::replica_msg::{ApiMsg};
 use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::{CoreNotification, CoreState};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{Fatal, LifeCycleError, PacificaError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
@@ -135,7 +135,7 @@ where
         }
     }
 
-    pub(crate) async fn handle_notification_msg(&mut self, msg: NotificationMsg<C>) -> Result<(), Fatal<C>> {
+    pub(crate) async fn handle_notification_msg(&mut self, msg: NotificationMsg<C>) -> Result<(), LifeCycleError<C>> {
         match msg {
             NotificationMsg::SendCommitResult { result } => {
                 self.handle_send_commit_result(result)?;
@@ -149,6 +149,11 @@ where
             NotificationMsg::HigherVersion { version } => {
                 self.handle_receive_higher_version(version).await?;
             }
+            NotificationMsg::ReportFatal {
+                fatal
+            } => {
+                let _ = self.handle_report_fatal(fatal);
+            }
         }
         Ok(())
     }
@@ -157,29 +162,30 @@ where
         self.core_state.get_replica_state()
     }
 
-    async fn handle_receive_higher_term(&mut self, term: usize) -> Result<(), Fatal<C>> {
+    async fn handle_receive_higher_term(&mut self, term: usize) -> Result<(), LifeCycleError<C>> {
         tracing::warn!("received higher term({})", term);
         let _ = self.replica_group.force_refresh_get().await;
         self.handle_state_change().await?;
         Ok(())
     }
 
-    async fn handle_receive_higher_version(&mut self, version: usize) -> Result<(), Fatal<C>> {
+    async fn handle_receive_higher_version(&mut self, version: usize) -> Result<(), LifeCycleError<C>> {
         tracing::warn!("received higher version({})", version);
         let _ = self.replica_group.force_refresh_get().await;
         self.handle_state_change().await?;
         Ok(())
     }
 
-    fn handle_send_commit_result(&self, result: CommitResult<C>) -> Result<(), Fatal<C>> {
+    fn handle_send_commit_result(&self, result: CommitResult<C>) -> Result<(), LifeCycleError<C>> {
         if self.core_state.is_primary() {
             self.core_state.send_commit_result(result)?;
         }
         Ok(())
     }
 
+    #[inline]
     fn handle_commit(&self, operation: Operation<C>) {
-        self.core_state.handle_commit_operation(operation);
+        self.core_state.commit_operation(operation);
     }
 
     #[inline]
@@ -192,7 +198,7 @@ where
         self.core_state.replica_recover().await
     }
 
-    async fn handle_state_change(&mut self) -> Result<(), Fatal<C>> {
+    async fn handle_state_change(&mut self) -> Result<(), LifeCycleError<C>> {
         let old_replica_state = self.core_state.get_replica_state();
         let new_replica_state = self.replica_group.get_state(self.replica_id.clone()).await;
         if old_replica_state != new_replica_state {
@@ -205,17 +211,13 @@ where
         Ok(())
     }
 
-    async fn handle_commit_operation(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
-        if !self.core_state.is_primary() {
-            // reject
-            todo!()
-        }
+    async fn handle_report_fatal(&mut self, fatal: Fatal) {
+        // report fatal to fsm
+        let _ = self.fsm_caller.report_fatal(fatal);
+        // core state shutdown
 
-        self.core_state.handle_commit_operation(operation);
 
-        //
 
-        Ok(())
     }
 
     async fn new_core_state(&self, replica_state: ReplicaState) -> CoreState<C, FSM> {
@@ -284,7 +286,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         // startup log_manager
         self.log_manager.startup().await?;
         // startup fsm_caller
@@ -296,7 +298,7 @@ where
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         // startup fsm_caller
         self.fsm_caller.shutdown().await?;
         // startup log_manager
@@ -313,7 +315,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() =>{

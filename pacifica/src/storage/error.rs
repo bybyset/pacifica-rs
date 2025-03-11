@@ -1,6 +1,6 @@
+use crate::LogId;
 use anyerror::AnyError;
 use thiserror::Error;
-use crate::LogId;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ErrorVerb {
@@ -22,9 +22,9 @@ pub enum ErrorSubject {
     ResetLogStorage { next_log_index: usize },
     GetLogEntry { log_index: usize },
     ReadLogId,
-    WriteLogId { log_id: LogId},
-
-    DownloadSnapshot {reader_id: usize},
+    WriteLogId { log_id: LogId },
+    GenerateReaderId,
+    DownloadSnapshot { reader_id: usize },
 }
 
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
@@ -90,25 +90,18 @@ impl StorageError {
     }
 
     pub fn read_log_id(source: impl Into<AnyError>) -> Self {
-        Self::new(
-            ErrorSubject::ReadLogId,
-            ErrorVerb::Read,
-            source,
-        )
+        Self::new(ErrorSubject::ReadLogId, ErrorVerb::Read, source)
     }
 
     pub fn write_log_id(log_id: LogId, source: impl Into<AnyError>) -> Self {
-        Self::new(
-            ErrorSubject::WriteLogId {log_id},
-            ErrorVerb::Write,
-            source,
-        )
+        Self::new(ErrorSubject::WriteLogId { log_id }, ErrorVerb::Write, source)
     }
 
     pub fn download_snapshot(reader_id: usize, source: impl Into<AnyError>) -> Self {
-        Self::new(ErrorSubject::DownloadSnapshot {reader_id}, ErrorVerb::Write, source)
+        Self::new(ErrorSubject::DownloadSnapshot { reader_id }, ErrorVerb::Write, source)
     }
 
-
-
+    pub fn generate_reader_id(source: impl Into<AnyError>) -> Self {
+        Self::new(ErrorSubject::GenerateReaderId, ErrorVerb::Write, source)
+    }
 }

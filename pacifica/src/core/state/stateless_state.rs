@@ -1,7 +1,7 @@
 use crate::core::lifecycle::Component;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, TaskSender};
-use crate::error::Fatal;
+use crate::error::LifeCycleError;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::{RepeatedTimer, TickFactory};
@@ -50,7 +50,7 @@ where
         }
     }
 
-    async fn handle_check(&mut self) -> Result<(), Fatal<C>> {
+    async fn handle_check(&mut self) -> Result<(), LifeCycleError<C>> {
         let _ = self.replica_group_agent.force_refresh_get().await;
         let new_state = self.replica_group_agent.get_self_state().await;
         if ReplicaState::Stateless != new_state {
@@ -71,12 +71,12 @@ impl<C> Lifecycle<C> for StatelessState<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         self.state_check_timer.turn_on();
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         self.state_check_timer.shutdown();
         Ok(())
     }
@@ -86,7 +86,7 @@ impl<C> Component<C> for StatelessState<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
             _ = rx_shutdown.recv().fuse() => {

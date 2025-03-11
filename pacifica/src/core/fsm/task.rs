@@ -1,6 +1,6 @@
 use crate::TypeConfig;
 use crate::core::ResultSender;
-use crate::error::PacificaError;
+use crate::error::{Fatal, PacificaError};
 use crate::util::AutoClose;
 
 pub(crate) enum Task<C>
@@ -28,6 +28,6 @@ where
     },
 
     ReportError {
-        fatal: PacificaError<C>,
+        fatal: Fatal,
     }
 }

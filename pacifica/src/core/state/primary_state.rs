@@ -8,14 +8,14 @@ use crate::core::replicator::{ReplicatorGroup, ReplicatorType};
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::task_sender::TaskSender;
 use crate::core::{operation, replicator, CoreNotification};
-use crate::error::{Fatal, PacificaError, ReplicaStateError};
+use crate::error::{LifeCycleError, PacificaError, ReplicaStateError};
 use crate::model::LogEntryPayload;
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{
     JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
 };
-use crate::util::{RepeatedTimer, TickFactory};
+use crate::util::{send_result, RepeatedTimer, TickFactory};
 use crate::{LogEntry, LogId, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -81,38 +81,50 @@ where
         }
     }
 
-    pub(crate) fn commit(&self, operation: Operation<C>) -> Result<(), Fatal<C>> {
-        self.submit_task(Task::Commit { operation })?;
-        Ok(())
+    pub(crate) fn commit(&self, operation: Operation<C>) {
+        let result = self.tx_task.tx_task.send(Task::Commit { operation });
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                let task = e.0;
+                match task {
+                    Task::Commit { operation } => match operation.callback {
+                        Some(callback) => {
+                            let _ = send_result(callback, Err(PacificaError::Shutdown));
+                        }
+                        None => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
     }
 
-    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), Fatal<C>> {
+    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError<C>> {
         self.ballot_box.announce_result(commit_result)
     }
 
     /// 协调阶段， 主副本提交一个'空'请求，从副本将于此次请求对齐
-    pub(crate) async fn reconciliation(&self) -> Result<(), Fatal<C>> {
+    pub(crate) async fn reconciliation(&self) -> Result<(), LifeCycleError<C>> {
         let operation = Operation::new_empty();
-        self.commit(operation)?;
+        self.commit(operation);
         Ok(())
     }
 
     pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>) -> Result<(), PacificaError<C>> {
-
-        // 1.2 check in replica group
-        let is_secondary = self.replica_group_agent.is_secondary(new_primary).await.map_err(|e| {
-            PacificaError::MetaError(e)
-        })?;
-        if !is_secondary {
-
+        // 1 check replica state
+        let replica_state = self.replica_group_agent.get_state(new_primary.clone()).await;
+        if !replica_state.is_secondary() {
+            return Err(PacificaError::ReplicaStateError(ReplicaStateError::secondary_but_not(
+                replica_state,
+            )));
         }
         let last_log_index = self.log_manager.get_last_log_index();
-        let r = self.replicator_group.transfer_primary(new_primary, last_log_index).await;
-
+        self.replicator_group.transfer_primary(new_primary, last_log_index).await?;
         Ok(())
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::Commit { operation } => self.handle_commit_task(operation).await?,
 
@@ -127,7 +139,7 @@ where
         Ok(())
     }
 
-    async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), Fatal<C>> {
+    async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), LifeCycleError<C>> {
         //init and append ballot box for the operation
         let log_term = self.replica_group_agent.get_term();
         let replica_group = self.replica_group_agent.get_replica_group().await?;
@@ -223,7 +235,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError> {
         // startup ballot box
         self.ballot_box.startup().await?;
         // start replicator group
@@ -235,7 +247,7 @@ where
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         //
         self.lease_period_timer.turn_off();
         // shutdown ballot box
@@ -252,7 +264,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
             _ = rx_shutdown.recv().fuse() => {

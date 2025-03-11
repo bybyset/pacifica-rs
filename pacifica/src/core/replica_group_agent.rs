@@ -3,7 +3,7 @@ use crate::core::lifecycle::{Component, Lifecycle};
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;
 use crate::core::ResultSender;
-use crate::error::Fatal;
+use crate::error::LifeCycleError;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, Oneshot, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf};
 use crate::util::send_result;
@@ -41,7 +41,7 @@ where
         }
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::ForceRefreshGet { callback } => {
                 let result = self.force_refresh_get_replica_group().await;
@@ -194,7 +194,7 @@ where
 
     pub(crate) async fn force_refresh_get(&self) -> Result<ReplicaGroup<C>, MetaError> {
         let (tx, rx) = C::oneshot();
-        self.tx_task.send(Task::ForceRefreshGet { callback: tx }).map_err(|_| Fatal::Shutdown)?;
+        self.tx_task.send(Task::ForceRefreshGet { callback: tx }).map_err(|_| LifeCycleError::Shutdown)?;
         rx.await
     }
 
@@ -269,11 +269,11 @@ impl<C> Lifecycle<C> for ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         Ok(true)
     }
 }
@@ -282,7 +282,7 @@ impl<C> Component<C> for ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                 _ = rx_shutdown.recv().fuse() =>{

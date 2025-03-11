@@ -3,7 +3,7 @@ use crate::core::pacifica_core::ReplicaCore;
 use crate::core::replica_msg::ApiMsg;
 use crate::core::replica_msg::ApiMsg::CommitOperation;
 use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
     InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest,
@@ -53,7 +53,7 @@ where
         snapshot_storage: C::SnapshotStorage,
         meta_client: C::MetaClient,
         replica_client: RC,
-    ) -> Result<Self, Fatal<C>>
+    ) -> Result<Self, LifeCycleError<C>>
     where
         FSM: StateMachine<C>,
         RC: ReplicaClient<C>,
@@ -139,7 +139,7 @@ where
         Ok(())
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    pub async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         self.inner.replica_core.shutdown().await?;
         Ok(())
     }

@@ -7,7 +7,7 @@ use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::state::append_entries_handler::AppendEntriesHandler;
 use crate::core::task_sender::TaskSender;
 use crate::core::{CoreNotification, ResultSender};
-use crate::error::{Fatal, HigherTermError, PacificaError};
+use crate::error::{LifeCycleError, HigherTermError, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, ReplicaRecoverRequest, ReplicaRecoverResponse};
 use crate::rpc::{ReplicaClient, RpcClientError, RpcOption};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
@@ -73,7 +73,7 @@ where
         }
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::Recover { callback } => {
                 self.handle_recover(callback).await?;
@@ -85,7 +85,7 @@ where
     async fn handle_recover(
         &mut self,
         callback: Option<ResultSender<C, (), PacificaError<C>>>,
-    ) -> Result<(), Fatal<C>> {
+    ) -> Result<(), LifeCycleError<C>> {
         let result = self.check_and_do_recover().await;
         match callback {
             Some(callback) => {
@@ -164,13 +164,13 @@ impl<C, FSM> Lifecycle<C> for CandidateState<C, FSM>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         self.recover_timer.turn_on();
 
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         let _ = self.recover_timer.shutdown().await;
         //
         Ok(())
@@ -182,7 +182,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
             _ = rx_shutdown.recv().fuse() => {

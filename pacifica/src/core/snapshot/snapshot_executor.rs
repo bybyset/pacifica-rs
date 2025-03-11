@@ -5,7 +5,7 @@ use crate::core::notification_msg::NotificationMsg;
 use crate::core::snapshot::task::Task;
 use crate::core::task_sender::TaskSender;
 use crate::core::ResultSender;
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotReader};
 use crate::type_config::alias::{
@@ -66,7 +66,7 @@ where
         }
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), Fatal<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
         match task {
             Task::SnapshotLoad { callback } => {
                 let result = self.do_snapshot_load().await;
@@ -113,8 +113,7 @@ where
             let snapshot_log_id = self
                 .fsm_caller
                 .on_snapshot_load(AutoClose::new(snapshot_reader))
-                .await
-                .map_err(|err| PacificaError::S (err))?;
+                .await?;
             //
             self.on_snapshot_success(snapshot_log_id.clone()).await?;
             return Ok(snapshot_log_id);
@@ -183,9 +182,9 @@ where
         self.last_snapshot_log_id.clone()
     }
 
-    pub(crate) async fn open_snapshot_reader(&mut self) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, PacificaError<C>> {
+    pub(crate) async fn open_snapshot_reader(&mut self) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, StorageError> {
         let snapshot_reader = self.snapshot_storage.open_reader().await.map_err(|e| {
-            StorageError::open_reader(e);
+            StorageError::open_reader(e)
         })?;
         let snapshot_reader = snapshot_reader.map(|reader| {
             AutoClose::new(reader)
@@ -199,7 +198,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, Fatal<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
         // first load snapshot
         self.load_snapshot().await?;
         // start snapshot timer
@@ -207,7 +206,7 @@ where
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
         self.snapshot_timer.shutdown().await?;
         Ok(true)
     }
@@ -218,7 +217,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         loop {
             futures::select_biased! {
                  _ = rx_shutdown.recv().fuse() => {

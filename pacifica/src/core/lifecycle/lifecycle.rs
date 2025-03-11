@@ -1,4 +1,4 @@
-use crate::error::Fatal;
+use crate::error::LifeCycleError;
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{JoinHandleOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
@@ -12,17 +12,17 @@ where
 {
     /// phase: startup
     /// return ture if success startup.
-    async fn startup(&mut self) -> Result<(), Fatal<C>>;
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>>;
 
     /// phase: shutdown
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>>;
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>>;
 }
 
 pub(crate) trait Component<C>: Lifecycle<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>>;
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>>;
 }
 
 pub(crate) struct ReplicaComponent<C, T>
@@ -31,7 +31,7 @@ where
     T: Component<C>,
 {
     tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    join_handler: Option<JoinHandleOf<C, Result<(), Fatal<C>>>>,
+    join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError<C>>>>,
     component: Box<dyn Component<C>>,
 }
 
@@ -53,7 +53,7 @@ impl<C> Lifecycle<C> for ReplicaComponent<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<(), Fatal<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match shutdown {
             Some(_) => {
@@ -73,7 +73,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), Fatal<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match shutdown {
             None => {
@@ -98,7 +98,7 @@ impl<C> Component<C> for ReplicaComponent<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), Fatal<C>> {
+    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
         self.component.run_loop(rx_shutdown)
     }
 }

@@ -3,7 +3,7 @@ use crate::core::lifecycle::ReplicaComponent;
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::CoreNotification;
-use crate::error::{Fatal, PacificaError};
+use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::{LogEntry, StateMachine, TypeConfig};
 use std::sync::Arc;

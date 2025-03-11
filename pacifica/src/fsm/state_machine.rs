@@ -1,4 +1,4 @@
-use crate::error::PacificaError;
+use crate::error::{Fatal, LifeCycleError, PacificaError};
 use crate::fsm::entry::Entry;
 use crate::type_config::alias::{SnapshotReaderOf, SnapshotWriteOf};
 use crate::TypeConfig;
@@ -30,5 +30,5 @@ where
 
     async fn on_shutdown(&self);
 
-    async fn on_error(&self, fatal: &PacificaError<C>);
+    async fn on_error(&self, fatal: &Fatal);
 }
