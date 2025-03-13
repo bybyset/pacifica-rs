@@ -32,6 +32,11 @@ impl LogEntryPayload {
         LogEntryPayload::Normal { op_data }
     }
 
+    pub fn with_vec(op_data: Vec<u8>) -> Self {
+        let op_data = Bytes::from(op_data);
+        Self::with_bytes(op_data)
+    }
+
     pub fn empty() -> Self {
         LogEntryPayload::Empty
     }

@@ -1,20 +1,44 @@
+use crate::config_cluster::MetaClient;
 use crate::pacifica::{Codec, Response};
+use crate::rpc::ReplicaClient;
 use crate::runtime::AsyncRuntime;
 use crate::{LogStorage, Request, SnapshotStorage};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
-use crate::config_cluster::MetaClient;
-use crate::rpc::ReplicaClient;
-
-
 
 pub trait NodeIdEssential:
-    From<String> + Into<String> + Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+    From<String>
+    + Into<String>
+    + Sized
+    + Eq
+    + PartialEq
+    + Ord
+    + PartialOrd
+    + Debug
+    + Display
+    + Hash
+    + Copy
+    + Clone
+    + Default
+    + 'static
 {
 }
 
 impl<T> NodeIdEssential for T where
-    T: From<String> + Into<String> + Sized + Eq + PartialEq + Ord + PartialOrd + Debug + Display + Hash + Copy + Clone + Default + 'static
+    T: From<String>
+        + Into<String>
+        + Sized
+        + Eq
+        + PartialEq
+        + Ord
+        + PartialOrd
+        + Debug
+        + Display
+        + Hash
+        + Copy
+        + Clone
+        + Default
+        + 'static
 {
 }
 
@@ -22,9 +46,7 @@ pub trait NodeId: NodeIdEssential {}
 
 impl<T> NodeId for T where T: NodeIdEssential {}
 
-
-
-pub trait TypeConfig {
+pub trait TypeConfig: Sized + Debug + Clone + Copy + Default + 'static {
     type Request: Request;
     type Response: Response;
     type RequestCodec: Codec<Self::Request>;
@@ -41,8 +63,8 @@ pub trait TypeConfig {
 
 pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
-    use crate::{AsyncRuntime, LogStorage, SnapshotStorage};
     use crate::TypeConfig;
+    use crate::{AsyncRuntime, LogStorage, SnapshotStorage};
 
     pub type AsyncRuntimeOf<C> = <C as TypeConfig>::AsyncRuntime;
 
@@ -54,7 +76,6 @@ pub mod alias {
     pub type SleepOf<C> = <RT<C> as AsyncRuntime>::Sleep;
     pub type TimeoutErrorOf<C> = <RT<C> as AsyncRuntime>::TimeoutError;
     pub type TimeoutOf<C, R, F> = <RT<C> as AsyncRuntime>::Timeout<R, F>;
-
 
     pub type MpscOf<C> = <RT<C> as AsyncRuntime>::Mpsc;
 
@@ -82,6 +103,4 @@ pub mod alias {
     pub type LogStorageOf<C> = <C as TypeConfig>::LogStorage;
     pub type LogReaderOf<C> = <LogStorageOf<C> as LogStorage>::Reader;
     pub type LogWriteOf<C> = <LogStorageOf<C> as LogStorage>::Writer;
-
-
 }

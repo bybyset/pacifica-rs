@@ -1,10 +1,10 @@
-use crate::error::LifeCycleError;
+use crate::error::{LifeCycleError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{JoinHandleOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
+use std::sync::{Mutex};
 
 pub(crate) trait Lifecycle<C>
 where
@@ -18,11 +18,20 @@ where
     async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>>;
 }
 
+pub(crate) trait LoopHandler<C>: Send + Sync + 'static
+where
+    C: TypeConfig,
+{
+    fn run_loop(self, rx_shutdown: OneshotReceiverOf<C, ()>) -> impl Future<Output = Result<(), LifeCycleError<C>>> + Send;
+}
+
 pub(crate) trait Component<C>: Lifecycle<C>
 where
     C: TypeConfig,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>>;
+    type LoopHandler: LoopHandler<C>;
+
+    fn new_loop_handler(&mut self) -> Self::LoopHandler;
 }
 
 pub(crate) struct ReplicaComponent<C, T>
@@ -32,7 +41,7 @@ where
 {
     tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
     join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError<C>>>>,
-    component: Box<dyn Component<C>>,
+    component: T,
 }
 
 impl<C, T> ReplicaComponent<C, T>
@@ -40,33 +49,36 @@ where
     C: TypeConfig,
     T: Component<C>,
 {
-    pub(crate) fn new(component: T) -> Self<C> {
+    pub(crate) fn new(component: T) -> ReplicaComponent<C, T> {
         ReplicaComponent {
             tx_shutdown: Mutex::new(None),
             join_handler: None,
-            component: Box::new(component),
+            component: component,
         }
     }
 }
 
-impl<C> Lifecycle<C> for ReplicaComponent<C>
+impl<C, T> Lifecycle<C> for ReplicaComponent<C, T>
 where
     C: TypeConfig,
+    T: Component<C>,
 {
     async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
-        match shutdown {
+        match *shutdown {
             Some(_) => {
                 // repeated startup
                 Ok(())
             }
             None => {
                 let (tx_shutdown, rx_shutdown) = C::oneshot();
-                let loop_handler = C::spawn(self.component.run_loop(rx_shutdown));
-                self.join_handler.replace(loop_handler);
+
+                let loop_handler = self.component.new_loop_handler();
+                let join_handler = C::spawn(loop_handler.run_loop(rx_shutdown));
+                self.join_handler.replace(join_handler);
                 shutdown.replace(tx_shutdown);
 
-                self.component.startup()?;
+                self.component.startup().await?;
 
                 Ok(())
             }
@@ -75,6 +87,7 @@ where
 
     async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
+        let shutdown = shutdown.take();
         match shutdown {
             None => {
                 // repeated shutdown or un startup
@@ -87,23 +100,19 @@ where
                 if let Some(loop_handler) = self.join_handler.take() {
                     let _ = loop_handler.await;
                 }
-                self.component.shutdown()?;
+                self.component.shutdown().await?;
                 Ok(())
             }
         }
     }
 }
 
-impl<C> Component<C> for ReplicaComponent<C>
+
+impl<C, T> Deref for ReplicaComponent<C, T>
 where
     C: TypeConfig,
+    T: Component<C>,
 {
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
-        self.component.run_loop(rx_shutdown)
-    }
-}
-
-impl<C, T> Deref for ReplicaComponent<C, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -111,9 +120,11 @@ impl<C, T> Deref for ReplicaComponent<C, T> {
     }
 }
 
-impl<C, T> DerefMut for ReplicaComponent<C, T> {
-    type Target = T;
-
+impl<C, T> DerefMut for ReplicaComponent<C, T>
+where
+    C: TypeConfig,
+    T: Component<C>,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.component
     }

@@ -1,4 +1,3 @@
-use crate::core::fatal::Fault;
 use crate::core::fsm::CommitResult;
 use crate::error::Fatal;
 use crate::TypeConfig;

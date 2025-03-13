@@ -1,5 +1,6 @@
 use crate::TypeConfig;
 use std::fmt::{Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
@@ -37,17 +38,21 @@ where
     pub node_id: C::NodeId,
 }
 
-impl<C> Display for ReplicaId<C> {
+impl<C> Display for ReplicaId<C>
+where C: TypeConfig
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.inner)
     }
 }
 
-impl<C> Display for ReplicaIdWrapper<C> {
+impl<C> Display for ReplicaIdWrapper<C>
+where C: TypeConfig{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}-{}", self.group_name, self.node_id)
     }
 }
+
 
 #[cfg(test)]
 mod test {
@@ -58,6 +63,20 @@ mod test {
 
     #[derive(Debug)]
     struct MockTypeConfig;
+
+    impl Clone for MockTypeConfig {
+        fn clone(&self) -> Self {
+            Self
+        }
+    }
+
+    impl Copy for MockTypeConfig {}
+
+    impl Default for MockTypeConfig {
+        fn default() -> Self {
+            Self
+        }
+    }
 
     impl TypeConfig for MockTypeConfig {
         type Request = ();

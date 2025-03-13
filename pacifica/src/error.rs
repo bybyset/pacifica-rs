@@ -47,6 +47,15 @@ where
         }
     }
 }
+impl<C> Display for LifeCycleError<C>
+where
+    C: TypeConfig,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 
 impl<C> Error for LifeCycleError<C>
 where

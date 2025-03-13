@@ -48,7 +48,7 @@ where
 }
 
 pub(crate) enum CaughtUpError {
-    #[]
+
     MetaError,
     Timeout,
 

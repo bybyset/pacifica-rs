@@ -75,7 +75,7 @@ pub struct ReplicaOption {
     pub max_payload_entries_bytes: u64,
 
     ///
-    #[clap(bool, default_value = "true")]
+    #[clap(long, parse(try_from_str = bool::from_str), default_value = "true")]
     pub log_entry_checksum_enable: bool,
 
 

@@ -15,8 +15,6 @@ mod lifecycle;
 mod task_sender;
 mod core_notification;
 mod caught_up;
-mod fatal;
-
 pub(crate) type ResultSender<C, T, E> = OneshotSenderOf<C, Result<T, E>>;
 
 pub(crate) use self::state::CoreState;
@@ -29,7 +27,6 @@ pub(crate) use self::core_notification::CoreNotification;
 
 pub(crate) use self::caught_up::CaughtUpError;
 
-
-pub use self::log::LogManagerError;
+pub(crate) use self::log::LogManagerError;
 
 

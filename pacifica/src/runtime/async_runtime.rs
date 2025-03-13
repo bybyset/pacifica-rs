@@ -16,8 +16,8 @@ pub trait AsyncRuntime {
     type MpscUnbounded: MpscUnbounded;
     type Oneshot: Oneshot;
     type Watch: Watch;
-    type JoinError: Debug + Display;
-    type JoinHandle<T: Send + 'static>: Future<Output = Result<T, Self::JoinError>>;
+    type JoinError: Debug + Display + Send;
+    type JoinHandle<T: Send + 'static>: Future<Output = Result<T, Self::JoinError>> + Send + Sync + Unpin;
 
 
 

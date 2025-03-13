@@ -131,7 +131,7 @@ where
             ApiMsg::TransferPrimary { new_primary,
                 timeout,
                 callback } => {
-                let result = self.handle_transfer_primary(new_primary).await;
+                let result = self.handle_transfer_primary(new_primary, timeout).await;
                 let _ = send_result(callback, result);
             }
         }

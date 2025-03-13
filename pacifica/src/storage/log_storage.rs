@@ -20,10 +20,10 @@ pub trait LogStorage {
 
 impl<T: LogStorage> LogEntryCodec for T {
     fn encode(entry: LogEntry) -> Result<Vec<u8>, AnyError> {
-        LogEntryCodec::encode(entry)
+        T::LogEntryCodec::encode(entry)
     }
 
     fn decode(encoded: impl AsRef<[u8]>) -> Result<LogEntry, AnyError> {
-        LogEntryCodec::decode(encoded)
+        T::LogEntryCodec::decode(encoded)
     }
 }
