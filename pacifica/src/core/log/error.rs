@@ -2,10 +2,8 @@ use thiserror::Error;
 use crate::error::{CorruptedLogEntryError, NotFoundLogEntry, PacificaError};
 use crate::{StorageError, TypeConfig};
 
-#[derive(Clone, Error)]
-pub enum LogManagerError<C>
-where
-    C: TypeConfig,
+#[derive(Debug, Error)]
+pub enum LogManagerError
 {
     /// not found LogEntry at log_index
     #[error(transparent)]
@@ -18,8 +16,8 @@ where
 }
 
 
-impl<C> LogManagerError<C>
-where C: TypeConfig{
+impl LogManagerError
+{
 
     pub(crate) fn not_found(log_index: usize) -> Self {
         LogManagerError::NotFound(NotFoundLogEntry::new(log_index))
@@ -33,11 +31,11 @@ where C: TypeConfig{
 
 }
 
-impl<C> From<LogManagerError<C>> for PacificaError<C>
+impl<C> From<LogManagerError> for PacificaError<C>
 where
     C: TypeConfig,
 {
-    fn from(value: LogManagerError<C>) -> Self {
+    fn from(value: LogManagerError) -> Self {
         match value {
             LogManagerError::CorruptedLogEntry(e) => PacificaError::CorruptedLogEntryError(e),
             LogManagerError::NotFound(e) => PacificaError::NotFoundLogEntryError(e),

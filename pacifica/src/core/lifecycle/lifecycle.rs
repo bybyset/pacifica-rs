@@ -12,17 +12,17 @@ where
 {
     /// phase: startup
     /// return ture if success startup.
-    async fn startup(&mut self) -> Result<(), LifeCycleError<C>>;
+    async fn startup(&mut self) -> Result<(), LifeCycleError>;
 
     /// phase: shutdown
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>>;
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError>;
 }
 
 pub(crate) trait LoopHandler<C>: Send + Sync + 'static
 where
     C: TypeConfig,
 {
-    fn run_loop(self, rx_shutdown: OneshotReceiverOf<C, ()>) -> impl Future<Output = Result<(), LifeCycleError<C>>> + Send;
+    fn run_loop(self, rx_shutdown: OneshotReceiverOf<C, ()>) -> impl Future<Output = Result<(), LifeCycleError>> + Send;
 }
 
 pub(crate) trait Component<C>: Lifecycle<C>
@@ -40,7 +40,7 @@ where
     T: Component<C>,
 {
     tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError<C>>>>,
+    join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError>>>,
     component: T,
 }
 
@@ -63,7 +63,7 @@ where
     C: TypeConfig,
     T: Component<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match *shutdown {
             Some(_) => {
@@ -85,7 +85,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         let shutdown = shutdown.take();
         match shutdown {

@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::LogId;
 use anyerror::AnyError;
 use thiserror::Error;
@@ -103,5 +104,15 @@ impl StorageError {
 
     pub fn generate_reader_id(source: impl Into<AnyError>) -> Self {
         Self::new(ErrorSubject::GenerateReaderId, ErrorVerb::Write, source)
+    }
+}
+
+
+impl Display for StorageError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let _ = write!(f, " StorageError: \n");
+        let _ = write!(f, "      Subject: {:?} \n", self.subject);
+        let _=  write!(f, "         Verb: {:?} \n", self.verb);
+        write!(f, "       Source: {}", self.source)
     }
 }

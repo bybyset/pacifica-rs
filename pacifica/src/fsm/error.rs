@@ -1,5 +1,6 @@
+use std::error::Error;
 use anyerror::AnyError;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Debug)]
 pub enum ErrorSubject {
@@ -7,20 +8,14 @@ pub enum ErrorSubject {
     CommitEntry,
     /// while load snapshot
     LoadSnapshot,
-
-
     /// while save snapshot
     SaveSnapshot,
-
-
-
-
 }
 
 /// wrap error of user custom AnyError
 pub struct UserStateMachineError {
-    source: AnyError,
     subject: ErrorSubject,
+    source: AnyError,
 }
 
 impl UserStateMachineError {
@@ -41,7 +36,7 @@ impl UserStateMachineError {
     }
 }
 
-impl Display for UserStateMachineError {
+impl Debug for UserStateMachineError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -49,4 +44,14 @@ impl Display for UserStateMachineError {
             self.subject, self.source
         )
     }
+}
+
+impl Display for UserStateMachineError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for UserStateMachineError {
+
 }

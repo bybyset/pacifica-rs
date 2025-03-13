@@ -7,11 +7,11 @@ pub(crate) enum ReplicatorType {
 
 impl ReplicatorType {
     pub(crate) fn is_candidate(&self) -> bool {
-        matches!(self, Candidate)
+        matches!(self, ReplicatorType::Candidate)
     }
 
     pub(crate) fn is_secondary(&self) -> bool {
-        matches!(self, Secondary)
+        matches!(self, ReplicatorType::Secondary)
     }
 }
 

@@ -32,4 +32,4 @@ impl fmt::Display for RecvError {
     }
 }
 
-impl<T> std::error::Error for RecvError {}
+impl std::error::Error for RecvError {}

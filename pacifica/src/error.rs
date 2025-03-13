@@ -2,78 +2,67 @@ use crate::config_cluster::MetaError;
 use crate::pacifica::EncodeError;
 use crate::{LogId, ReplicaState, StorageError, TypeConfig};
 use anyerror::AnyError;
-use std::error::Error;
+use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 
-pub use crate::core::LogManagerError;
 use crate::fsm::UserStateMachineError;
 pub use crate::rpc::ConnectError;
 pub use crate::rpc::RpcClientError;
 pub use crate::rpc::RpcServiceError;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum Fatal {
-    #[error(transparent)]
-    StorageError(#[from] StorageError),
-
-    #[error(transparent)]
-    CorruptedLogEntryError(#[from] CorruptedLogEntryError)
+    StorageError(StorageError),
+    CorruptedLogEntryError(CorruptedLogEntryError)
 }
 
-impl Error for Fatal {}
+impl Display for Fatal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Fatal::StorageError(e) => write!(f, "Fatal storage error. {}", e),
+            Fatal::CorruptedLogEntryError(e) => write!(f,"Fatal corrupted log entry error. {}", e)
+        }
+    }
+}
+
+impl StdError for Fatal {}
 
 /// Fatal is unrecoverable
-#[derive(Debug, Error)]
-pub enum LifeCycleError<C>
-where
-    C: TypeConfig,
+#[derive(Debug)]
+pub enum LifeCycleError
 {
     /// shutdown normally.
-    #[error("has shutdown")]
     Shutdown,
 
-    StartupError(#[from] AnyError),
+    StartupError(AnyError),
 }
 
-impl<C> Debug for LifeCycleError<C>
-where
-    C: TypeConfig,
+impl Display for LifeCycleError
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Shutdown => write!(f, "Has Shutdown"),
-            Self::StartupError(e) => write!(f, "Failed to startup. err={}", e),
+            LifeCycleError::Shutdown => write!(f, "Has Shutdown"),
+            LifeCycleError::StartupError(e) => write!(f, "Failed to startup, {}", e)
         }
     }
 }
-impl<C> Display for LifeCycleError<C>
-where
-    C: TypeConfig,
-{
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
 
-
-impl<C> Error for LifeCycleError<C>
-where
-    C: TypeConfig,
+impl StdError for LifeCycleError
 {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Shutdown => None,
-            Self::StartupError(e) => Some(e as &dyn Error),
+            Self::StartupError(e) => Some(e as &dyn StdError),
         }
     }
 }
 
-impl<C> From<LifeCycleError<C>> for PacificaError<C>
+impl<C> From<LifeCycleError> for PacificaError<C>
 where
     C: TypeConfig,
 {
-    fn from(value: LifeCycleError<C>) -> Self {
+    fn from(value: LifeCycleError) -> Self {
         match value {
             _ => PacificaError::Shutdown,
         }
@@ -118,19 +107,6 @@ where
     ApiTimeout,
 }
 
-impl<C> Debug for PacificaError<C> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-impl<C> Display for PacificaError<C> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-impl<C> Error for PacificaError<C> {}
 
 ///
 pub struct ReplicaStateError {
@@ -163,7 +139,7 @@ impl ReplicaStateError {
     }
 }
 
-impl Display for ReplicaStateError {
+impl Debug for ReplicaStateError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -171,6 +147,16 @@ impl Display for ReplicaStateError {
             self.expect_state, self.actual_state
         )
     }
+}
+
+impl Display for ReplicaStateError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl StdError for ReplicaStateError {
+
 }
 
 #[derive(Clone)]
@@ -196,7 +182,7 @@ impl Display for HigherTermError {
     }
 }
 
-impl Error for HigherTermError {}
+impl StdError for HigherTermError {}
 
 pub struct IllegalSnapshotError {
     pub committed_log_id: LogId,
@@ -228,7 +214,7 @@ impl Display for IllegalSnapshotError {
     }
 }
 
-impl Error for IllegalSnapshotError {}
+impl StdError for IllegalSnapshotError {}
 
 #[derive(Clone)]
 pub struct CorruptedLogEntryError {
@@ -258,7 +244,7 @@ impl Display for CorruptedLogEntryError {
     }
 }
 
-impl Error for CorruptedLogEntryError {}
+impl StdError for CorruptedLogEntryError {}
 
 #[derive(Clone)]
 pub struct NotFoundLogEntry {
@@ -283,4 +269,4 @@ impl Display for NotFoundLogEntry {
     }
 }
 
-impl Error for NotFoundLogEntry {}
+impl StdError for NotFoundLogEntry {}

@@ -149,12 +149,12 @@ where
 {
     fn from(value: PacificaError<C>) -> Self {
         match value {
-            PacificaError::Shutdown => Self::shutdown(value),
-            PacificaError::EncodeError(..) => Self::encode_error(value),
-            PacificaError::MetaError(..) => Self::meta_error(value),
-            PacificaError::StorageError(..) => Self::storage_error(value),
-            PacificaError::ReplicaStateError(..) => Self::replica_state_error(value),
-            _ => Self::unknown(value),
+            PacificaError::Shutdown => Self::shutdown(value.to_string()),
+            PacificaError::EncodeError(..) => Self::encode_error(value.to_string()),
+            PacificaError::MetaError(..) => Self::meta_error(value.to_string()),
+            PacificaError::StorageError(..) => Self::storage_error(value.to_string()),
+            PacificaError::ReplicaStateError(..) => Self::replica_state_error(value.to_string()),
+            _ => Self::unknown(value.to_string()),
         }
     }
 }
