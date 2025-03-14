@@ -11,7 +11,8 @@ mod type_config;
 pub mod runtime;
 pub mod rpc;
 pub mod util;
-
+pub mod test;
+mod str_node_id;
 
 pub use crate::pacifica::Replica;
 pub use crate::pacifica::ReplicaRouter;
@@ -24,6 +25,8 @@ pub use crate::model::LogEntry;
 pub use crate::model::ReplicaGroup;
 pub use crate::model::ReplicaId;
 pub use crate::model::ReplicaState;
+
+pub use crate::str_node_id::StrNodeId;
 
 
 pub use crate::fsm::StateMachine;

@@ -10,7 +10,7 @@ pub struct Leased<I: Instant> {
 }
 
 impl<I: Instant> Leased<I> {
-    pub fn new(now: I, lease: Duration) -> Self<I> {
+    pub fn new(now: I, lease: Duration) -> Leased<I> {
         Leased {
             last_update: Some(now),
             lease,

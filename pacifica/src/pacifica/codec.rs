@@ -9,14 +9,14 @@ pub trait Codec<T> {
     fn decode(bytes: Bytes) -> Result<T, DecodeError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct EncodeError<T>
 {
     pub encode: T,
     pub source: AnyError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DecodeError
 {
     pub decode: Bytes,
@@ -39,9 +39,17 @@ impl<T> Error for EncodeError<T> {
 
 }
 
-impl Display for DecodeError {
+
+
+impl Debug for DecodeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to decode. bytes:[len={}], error: {}", self.decode.len(),  self.source)
+    }
+}
+
+impl Display for DecodeError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 

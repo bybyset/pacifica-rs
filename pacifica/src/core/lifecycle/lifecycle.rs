@@ -1,10 +1,10 @@
-use crate::error::{LifeCycleError};
+use crate::error::LifeCycleError;
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{JoinHandleOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
 use std::future::Future;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Mutex};
+use std::sync::Mutex;
 
 pub(crate) trait Lifecycle<C>
 where
@@ -18,26 +18,27 @@ where
     async fn shutdown(&mut self) -> Result<(), LifeCycleError>;
 }
 
-pub(crate) trait LoopHandler<C>: Send + Sync + 'static
+pub(crate) trait LoopHandler<C>
 where
     C: TypeConfig,
 {
-    fn run_loop(self, rx_shutdown: OneshotReceiverOf<C, ()>) -> impl Future<Output = Result<(), LifeCycleError>> + Send;
+    fn run_loop(self, rx_shutdown: OneshotReceiverOf<C, ()>)
+        -> impl Future<Output = Result<(), LifeCycleError>> + Send;
 }
 
 pub(crate) trait Component<C>: Lifecycle<C>
 where
     C: TypeConfig,
 {
-    type LoopHandler: LoopHandler<C>;
+    type LoopHandler: LoopHandler<C> + Send + Sync + 'static;
 
-    fn new_loop_handler(&mut self) -> Self::LoopHandler;
+    fn new_loop_handler(&mut self) -> Option<Self::LoopHandler>;
 }
 
 pub(crate) struct ReplicaComponent<C, T>
 where
     C: TypeConfig,
-    T: Component<C>,
+    T: Component<C> + Sized,
 {
     tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
     join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError>>>,
@@ -72,14 +73,16 @@ where
             }
             None => {
                 let (tx_shutdown, rx_shutdown) = C::oneshot();
-
                 let loop_handler = self.component.new_loop_handler();
-                let join_handler = C::spawn(loop_handler.run_loop(rx_shutdown));
-                self.join_handler.replace(join_handler);
-                shutdown.replace(tx_shutdown);
-
+                match loop_handler {
+                    Some(loop_handler) => {
+                        let join_handler = C::spawn(loop_handler.run_loop(rx_shutdown));
+                        self.join_handler.replace(join_handler);
+                        shutdown.replace(tx_shutdown);
+                    }
+                    None => {}
+                }
                 self.component.startup().await?;
-
                 Ok(())
             }
         }
@@ -106,7 +109,6 @@ where
         }
     }
 }
-
 
 impl<C, T> Deref for ReplicaComponent<C, T>
 where

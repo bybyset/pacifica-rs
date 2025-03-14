@@ -9,7 +9,7 @@ where
 {
     AppendLogEntries {
         log_entries: Vec<LogEntry>,
-        callback: ResultSender<C, (), LogManagerError<C>>,
+        callback: ResultSender<C, (), LogManagerError>,
     },
 
     TruncatePrefix {

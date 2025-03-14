@@ -11,9 +11,9 @@ pub use self::declare_pacifica_types::*;
 
 
 
-pub trait Request {}
+pub trait Request: Send + Sized {}
 
-pub trait Response {}
+pub trait Response: Send + Sized  {}
 
 
 

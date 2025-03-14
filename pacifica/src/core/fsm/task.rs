@@ -1,6 +1,7 @@
 use crate::TypeConfig;
 use crate::core::ResultSender;
 use crate::error::{Fatal, PacificaError};
+use crate::type_config::alias::{SnapshotReaderOf, SnapshotWriteOf};
 use crate::util::AutoClose;
 
 pub(crate) enum Task<C>
@@ -18,12 +19,12 @@ where
     },
 
     SnapshotLoad {
-        snapshot_reader: AutoClose<C::SnapshotStorage::Reader>,
+        snapshot_reader: AutoClose<SnapshotReaderOf<C>>,
         callback: ResultSender<C, (), PacificaError<C>>,
     },
 
     SnapshotSave {
-        snapshot_writer: AutoClose<C::SnapshotStorage::Writer>,
+        snapshot_writer: AutoClose<SnapshotWriteOf<C>>,
         callback: ResultSender<C, (), PacificaError<C>>,
     },
 

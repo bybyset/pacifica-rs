@@ -26,7 +26,7 @@ where C: TypeConfig {
     }
 
     async fn check_connected(&self, replica_id: &ReplicaId<C>, create_if_absent: bool) -> Result<bool, ConnectError<C>> {
-        if !self.is_connected(replica_id) {
+        if !self.is_connected(replica_id).await {
             if create_if_absent {
                 self.connect(replica_id).await?;
                 return Ok(true)

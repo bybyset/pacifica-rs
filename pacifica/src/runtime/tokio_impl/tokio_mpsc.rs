@@ -1,6 +1,7 @@
 use crate::runtime::error::SendError;
 use crate::runtime::{Mpsc, MpscReceiver, MpscSender};
 use std::future::Future;
+use futures::TryFutureExt;
 use tokio::sync::mpsc;
 
 pub struct TokioMpsc {}

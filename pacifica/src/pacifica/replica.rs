@@ -54,7 +54,7 @@ where
         snapshot_storage: C::SnapshotStorage,
         meta_client: C::MetaClient,
         replica_client: C::ReplicaClient,
-    ) -> Result<Self, LifeCycleError<C>>
+    ) -> Result<Self, LifeCycleError>
     where
         FSM: StateMachine<C>,
     {
@@ -145,7 +145,7 @@ where
         Ok(())
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
+    pub async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
         self.inner.replica_core.shutdown().await?;
         Ok(())
     }

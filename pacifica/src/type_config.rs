@@ -9,6 +9,8 @@ use std::hash::Hash;
 pub trait NodeIdEssential:
     From<String>
     + Into<String>
+    + Send
+    + Sync
     + Sized
     + Eq
     + PartialEq
@@ -27,6 +29,8 @@ pub trait NodeIdEssential:
 impl<T> NodeIdEssential for T where
     T: From<String>
         + Into<String>
+        + Send
+        + Sync
         + Sized
         + Eq
         + PartialEq
@@ -46,7 +50,7 @@ pub trait NodeId: NodeIdEssential {}
 
 impl<T> NodeId for T where T: NodeIdEssential {}
 
-pub trait TypeConfig: Sized + Debug + Clone + Copy + Default + 'static {
+pub trait TypeConfig: Sized + Send + Sync + Debug + Clone + Copy + Default +  Eq + PartialEq + Ord + PartialOrd + 'static {
     type Request: Request;
     type Response: Response;
     type RequestCodec: Codec<Self::Request>;
