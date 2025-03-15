@@ -11,6 +11,16 @@ fn parse_bytes_with_unit(src: &str) -> Result<u64, OptionError> {
     Ok(bytes.as_u64())
 }
 
+fn parse_bool(src: &str) -> Result<bool, OptionError> {
+    let r = bool::from_str(src).map_err(|e| {
+        OptionError::InvalidStr {
+            reason: e.to_string(),
+            parse_str: String::from(src),
+        }
+    })?;
+    Ok(r)
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct ReplicaOption {
     /// Grace Period. If the time limit of the Secondary detection is exceeded,
@@ -75,7 +85,7 @@ pub struct ReplicaOption {
     pub max_payload_entries_bytes: u64,
 
     ///
-    #[clap(long, parse(try_from_str = bool::from_str), default_value = "true")]
+    #[clap(long, default_value = "true", value_parser=parse_bool)]
     pub log_entry_checksum_enable: bool,
 
 
