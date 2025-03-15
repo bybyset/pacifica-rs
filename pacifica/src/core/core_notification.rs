@@ -9,7 +9,7 @@ pub(crate) struct CoreNotification<C>
 where
     C: TypeConfig,
 {
-    tx_notification: TaskSender<C, MpscUnboundedSenderOf<C, NotificationMsg<C>>>,
+    tx_notification: TaskSender<C, NotificationMsg<C>>,
 }
 
 impl<C> CoreNotification<C>
@@ -17,33 +17,32 @@ where
     C: TypeConfig,
 {
     pub(crate) fn new(tx_notification: MpscUnboundedSenderOf<C, NotificationMsg<C>>) -> Self {
-        CoreNotification {
-            tx_notification: TaskSender::new(tx_notification),
-        }
+        let tx_notification = TaskSender::<C, NotificationMsg<C>>::new(tx_notification);
+        CoreNotification { tx_notification }
     }
 
     pub(crate) fn higher_term(&self, term: usize) -> Result<(), PacificaError<C>> {
-        self.tx_notification.send(NotificationMsg::HigherTerm { term })?;
+        self.tx_notification.send(NotificationMsg::<C>::HigherTerm { term })?;
         Ok(())
     }
 
     pub(crate) fn higher_version(&self, version: usize) -> Result<(), PacificaError<C>> {
-        self.tx_notification.send(NotificationMsg::HigherVersion { version })?;
+        self.tx_notification.send(NotificationMsg::<C>::HigherVersion { version })?;
         Ok(())
     }
 
     pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), PacificaError<C>> {
-        self.tx_notification.send(NotificationMsg::SendCommitResult { result })?;
+        self.tx_notification.send(NotificationMsg::<C>::SendCommitResult { result })?;
         Ok(())
     }
 
     pub(crate) fn core_state_change(&self) -> Result<(), PacificaError<C>> {
-        self.tx_notification.send(NotificationMsg::CoreStateChange)?;
+        self.tx_notification.send(NotificationMsg::<C>::CoreStateChange)?;
         Ok(())
     }
 
     pub(crate) fn report_fatal(&self, fatal: Fatal) -> Result<(), PacificaError<C>> {
-        self.tx_notification.send(NotificationMsg::ReportFatal { fatal })?;
+        self.tx_notification.send(NotificationMsg::<C>::ReportFatal { fatal })?;
         Ok(())
     }
 
@@ -51,13 +50,11 @@ where
         if result.is_err() {
             let err = result.err().unwrap();
             match err {
-                PacificaError::Fatal(fatal) => {
+                PacificaError::<C>::Fatal(fatal) => {
                     let _ = self.report_fatal(fatal);
                     Err(PacificaError::Shutdown)
                 }
-                _ => {
-                    Err(err)
-                }
+                _ => Err(err),
             }
         } else {
             result

@@ -10,6 +10,8 @@ use std::io::{Error, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::error::Error as StdError;
+use std::fmt::{Debug, Display, Formatter};
 use crate::storage::fs_impl::fs_snapshot_storage::META_FILE_NAME;
 
 pub enum ReadFileError {
@@ -26,6 +28,33 @@ impl ReadFileError {
             },
         }
     }
+}
+
+impl Debug for ReadFileError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadFileError::NotFoundFile {
+                filename
+            } => {
+                write!(f, "Not Found File(filename={})", filename)
+            }
+            ReadFileError::ReadError {
+                source
+            } => {
+                write!(f, "Read Error. err: {})", source)
+            }
+        }
+    }
+}
+
+impl Display for ReadFileError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl StdError for ReadFileError {
+
 }
 
 pub struct FileReader<C, T, GFC>
@@ -98,7 +127,7 @@ where
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    pub fn new() -> Self<C, T, GFC> {
+    pub fn new() -> FileService<C, T, GFC> {
 
         FileService {
             reader_id_allocator: AtomicUsize::new(0),
@@ -136,7 +165,7 @@ where
                 match read_result {
                     Ok(eof) => Ok(GetFileResponse::success(buffer, eof)),
                     Err(e) => {
-                        tracing::error!("Failed to read file.", e);
+                        tracing::error!("Failed to read file. err:{}", e);
                         Ok(e.to_get_file_response())
                     }
                 }
