@@ -6,6 +6,8 @@ mod mpsc_unbounded;
 mod oneshot;
 mod watch;
 
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 pub use self::async_runtime::AsyncRuntime;
 pub use self::type_config_ext::TypeConfigExt;
 
@@ -26,6 +28,39 @@ pub use self::watch::WatchReceiver;
 
 pub use self::error::SendError;
 pub use self::error::RecvError;
+
+
+pub struct ReceiveError<E>
+where E: Error + Send {
+    pub source: E
+}
+
+
+
+impl<E> Debug for ReceiveError<E>
+where
+    E: Error + Send,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "receive error. source: {}", self.source)
+    }
+}
+
+impl<E> Display for ReceiveError<E>
+where
+    E: Error + Send,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl<E> Error for ReceiveError<E>
+where E: Error + Send {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
+    }
+}
 
 
 

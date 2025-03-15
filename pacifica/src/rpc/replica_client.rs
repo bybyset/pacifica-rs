@@ -1,4 +1,3 @@
-use anyerror::AnyError;
 use crate::rpc::message::AppendEntriesRequest;
 use crate::rpc::message::AppendEntriesResponse;
 use crate::rpc::message::InstallSnapshotRequest;

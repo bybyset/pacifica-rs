@@ -1,9 +1,15 @@
 use std::future::Future;
+use crate::runtime::ReceiveError;
+
+pub trait ReceiverError: std::error::Error + Send {
+
+}
+
 
 pub trait Oneshot {
+    type ReceiverError: ReceiverError;
     type Sender<T: Send>: OneshotSender<T>;
-    type Receiver<T: Send>: Send + Sync + Unpin + Future<Output = Result<T, Self::ReceiverError>>;
-    type ReceiverError: std::error::Error + Send;
+    type Receiver<T: Send>: Send + Sync + Unpin + Future<Output = Result<T, ReceiveError<Self::ReceiverError>>>;
 
     /// Creates a new one-shot channel for sending single values.
     ///
