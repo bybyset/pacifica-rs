@@ -79,7 +79,6 @@ impl Clone for StrNodeId {
     }
 }
 
-impl Copy for StrNodeId {}
 
 impl Hash for StrNodeId {
     fn hash<H: Hasher>(&self, state: &mut H) {
