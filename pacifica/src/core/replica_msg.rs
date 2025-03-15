@@ -17,7 +17,7 @@ where
     },
 
     TransferPrimary {
-        new_primary: ReplicaId<C>,
+        new_primary: ReplicaId<C::NodeId>,
         timeout: Duration,
         callback: ResultSender<C, (), PacificaError<C>>,
     },

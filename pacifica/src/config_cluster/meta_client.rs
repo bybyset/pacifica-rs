@@ -12,11 +12,11 @@ where C: TypeConfig {
     async fn get_replica_group(&self, group_name: impl AsRef<str>) -> Result<ReplicaGroup<C>, MetaError>;
 
     ///
-    async fn add_secondary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError>;
+    async fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
 
-    async fn remove_secondary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError>;
+    async fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
 
-    async fn change_primary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError>;
+    async fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
 
 
 

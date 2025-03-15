@@ -12,7 +12,7 @@ use crate::rpc::message::{
 use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::storage::GetFileService;
-use crate::type_config::alias::MpscUnboundedSenderOf;
+use crate::type_config::alias::{LogStorageOf, MetaClientOf, MpscUnboundedSenderOf, NodeIdOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::ReplicaId;
 use crate::ReplicaOption;
 use crate::StateMachine;
@@ -46,14 +46,14 @@ where
     /// StateMachine
     /// LogStorage  LogEntryCodec SnapshotStorage
     /// MetaClient ReplicaClient
-    pub async fn new<FSM>(
-        replica_id: ReplicaId<C>,
+    pub async fn new(
+        replica_id: ReplicaId<NodeIdOf<C>>,
         replica_option: ReplicaOption,
         fsm: FSM,
-        log_storage: C::LogStorage,
-        snapshot_storage: C::SnapshotStorage,
-        meta_client: C::MetaClient,
-        replica_client: C::ReplicaClient,
+        log_storage: LogStorageOf<C>,
+        snapshot_storage: SnapshotStorageOf<C>,
+        meta_client: MetaClientOf<C>,
+        replica_client: ReplicaClientOf<C>,
     ) -> Result<Self, LifeCycleError>
     where
         FSM: StateMachine<C>,
@@ -126,12 +126,12 @@ where
     }
 
     /// transfer primary to ['replica_id'] and default timeout: 120s
-    pub async fn transfer_primary(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+    pub async fn transfer_primary(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         self.transfer_primary_with_timeout(replica_id, Duration::from_secs(120))
     }
 
     /// transfer primary to ['replica_id'] with ['timeout']
-    pub async fn transfer_primary_with_timeout(&self, replica_id: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
+    pub async fn transfer_primary_with_timeout(&self, replica_id: ReplicaId<C::NodeId>, timeout: Duration) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.inner
             .tx_api

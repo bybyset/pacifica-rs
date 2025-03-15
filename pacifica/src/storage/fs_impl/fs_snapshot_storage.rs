@@ -574,7 +574,7 @@ where
         Ok(writer)
     }
 
-    async fn download_snapshot(&mut self, target_id: ReplicaId<C>, reader_id: usize) -> Result<(), AnyError> {
+    async fn download_snapshot(&mut self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError> {
         let download_temp_path = self.get_download_temp_path();
         if !download_temp_path.exists() {
             fs::create_dir(download_temp_path).map_err(|e| AnyError::from(e))?;

@@ -35,7 +35,7 @@ where
     replica_options: Arc<ReplicaOption>,
 
 
-    replicators: HashMap<ReplicaId<C>, ReplicaComponent<C, Replicator<C, FSM>>>,
+    replicators: HashMap<ReplicaId<C::NodeId>, ReplicaComponent<C, Replicator<C, FSM>>>,
     task_sender: TaskSender<C, Task<C, FSM>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C, FSM>>,
 }
@@ -73,7 +73,7 @@ where
 
     pub(crate) async fn add_replicator(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
         check_conn: bool,
     ) -> Result<(), PacificaError<C>> {
@@ -108,7 +108,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn is_alive(&self, replica_id: &ReplicaId<C>) -> bool {
+    pub(crate) fn is_alive(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         let replicator = self.replicators.get(replica_id);
         let alive = {
             match replicator {
@@ -123,7 +123,7 @@ where
 
     pub(crate) async fn wait_caught_up(
         &self,
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         timeout: Duration,
     ) -> Result<(), CaughtUpError> {
         //
@@ -140,15 +140,15 @@ where
         Ok(())
     }
 
-    pub(crate) fn get_primary_id(&self) -> ReplicaId<C> {
+    pub(crate) fn get_primary_id(&self) -> ReplicaId<C::NodeId> {
         self.replica_group_agent.current_id()
     }
 
-    pub(crate) fn get_replicator_ids(&self) -> Vec<&ReplicaId<C>> {
+    pub(crate) fn get_replicator_ids(&self) -> Vec<&ReplicaId<C::NodeId>> {
         self.replicators.keys().collect()
     }
 
-    pub(crate) async fn remove_replicator(&self, target_id: ReplicaId<C>) -> Option<Replicator<C, FSM>> {
+    pub(crate) async fn remove_replicator(&self, target_id: ReplicaId<C::NodeId>) -> Option<Replicator<C, FSM>> {
         let (callback, rx) = C::oneshot();
         let _ = self.task_sender.send(Task::RemoveReplicator {
             remove_id: target_id,
@@ -158,7 +158,7 @@ where
         result
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, last_log_index: usize, timeout: Duration) -> Result<(), PacificaError<C>>{
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C::NodeId>, last_log_index: usize, timeout: Duration) -> Result<(), PacificaError<C>>{
         let replicator = self.replicators.get(&new_primary);
         match replicator {
             Some(replicator) => {
@@ -171,7 +171,7 @@ where
         }
     }
 
-    async fn do_wait_caught_up(&self, replica_id: ReplicaId<C>) -> Result<(), CaughtUpError> {
+    async fn do_wait_caught_up(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), CaughtUpError> {
         let replicator = self.replicators.get(&replica_id);
         match replicator {
             Some(replicator) => {
@@ -189,9 +189,9 @@ where
 
     async fn do_add_replicator(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
-    ) -> Result<(), LifeCycleError<C>> {
+    ) -> Result<(), LifeCycleError> {
         let (callback, rx) = C::oneshot();
         let _ = self.task_sender.send(Task::AddReplicator {
             target_id,
@@ -204,7 +204,7 @@ where
 
     fn new_replicator(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
     ) -> ReplicaComponent<C, Replicator<C, FSM>> {
         let primary_id = self.replica_group_agent.current_id();
@@ -224,7 +224,7 @@ where
         ReplicaComponent::new(replicator)
     }
 
-    async fn remove_and_shutdown_replicator(&self, target_id: ReplicaId<C>) {
+    async fn remove_and_shutdown_replicator(&self, target_id: ReplicaId<C::NodeId>) {
         let replicator = self.remove_replicator(target_id).await;
         match replicator {
             Some(mut replicator) => {
@@ -254,7 +254,7 @@ where
 
     fn handle_remove_replicator(
         &mut self,
-        remove_id: &ReplicaId<C>,
+        remove_id: &ReplicaId<C::NodeId>,
     ) -> Option<ReplicaComponent<C, Replicator<C, FSM>>> {
         let replicator = self.replicators.remove(remove_id);
         replicator
@@ -262,9 +262,9 @@ where
 
     async fn handle_add_replicator(
         &mut self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
-    ) -> Result<(), LifeCycleError<C>> {
+    ) -> Result<(), LifeCycleError> {
         if !self.replicators.contains_key(&target_id) {
             let mut replicator = self.new_replicator(target_id.clone(), replicator_type);
             replicator.startup().await?;
@@ -294,7 +294,7 @@ where
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
         Ok(())
     }
 }
@@ -334,13 +334,13 @@ where
     FSM: StateMachine<C>,
 {
     AddReplicator {
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
-        callback: ResultSender<C, (), LifeCycleError<C>>,
+        callback: ResultSender<C, (), LifeCycleError>,
     },
     RemoveReplicator {
-        remove_id: ReplicaId<C>,
-        callback: ResultSender<C, Option<Replicator<C, FSM>>, LifeCycleError<C>>,
+        remove_id: ReplicaId<C::NodeId>,
+        callback: ResultSender<C, Option<Replicator<C, FSM>>, LifeCycleError>,
     },
 
 }

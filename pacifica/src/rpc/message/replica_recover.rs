@@ -6,11 +6,12 @@ where
 {
     pub term: usize,
     pub version: usize,
-    pub recover_id: ReplicaId<C>,
+    pub recover_id: ReplicaId<C::NodeId>,
 }
 
-impl<C> ReplicaRecoverRequest<C> {
-    pub fn new(term: usize, version: usize, recover_id: ReplicaId<C>) -> ReplicaRecoverRequest<C> {
+impl<C> ReplicaRecoverRequest<C>
+where C:TypeConfig{
+    pub fn new(term: usize, version: usize, recover_id: ReplicaId<C::NodeId>) -> ReplicaRecoverRequest<C> {
         ReplicaRecoverRequest {
             term,
             version,

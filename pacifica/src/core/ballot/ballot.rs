@@ -7,14 +7,14 @@ where
     C: TypeConfig,
 {
     quorum: AtomicU8,
-    granters: HashMap<ReplicaId<C>, AtomicBool>,
+    granters: HashMap<ReplicaId<C::NodeId>, AtomicBool>,
 }
 
 impl<C> Ballot<C>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(replica_ids: Vec<ReplicaId<C>>) -> Self {
+    pub(crate) fn new(replica_ids: Vec<ReplicaId<C::NodeId>>) -> Self {
         let quorum = replica_ids.len();
         let mut granters = HashMap::with_capacity(quorum);
         replica_ids.into_iter().for_each(|replica_id| {
@@ -36,7 +36,7 @@ where
         self.quorum.load(Ordering::Relaxed) == 0
     }
 
-    pub(crate) fn grant(&self, replica_id: &ReplicaId<C>) -> bool {
+    pub(crate) fn grant(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         let result = self.granters.get(replica_id);
         if let Some(granter) = result {
             if granter.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
@@ -46,7 +46,7 @@ where
         self.quorum.load(Ordering::Relaxed) == 0
     }
 
-    pub(crate) fn add_quorum(&mut self, replica_id: ReplicaId<C>) {
+    pub(crate) fn add_quorum(&mut self, replica_id: ReplicaId<C::NodeId>) {
         let result = self.granters.get(&replica_id);
         match result {
             None => {

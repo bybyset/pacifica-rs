@@ -17,9 +17,7 @@ use crate::rpc::message::{
 use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::GetFileService;
-use crate::type_config::alias::{
-    MpscUnboundedReceiverOf, OneshotReceiverOf,
-};
+use crate::type_config::alias::{LogStorageOf, MetaClientOf, MpscUnboundedReceiverOf, NodeIdOf, OneshotReceiverOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::util::{send_result};
 use crate::{LogId, ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::{Arc, RwLock};
@@ -51,13 +49,13 @@ where
     FSM: StateMachine<C>,
 {
     pub(crate) fn new(
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<NodeIdOf<C>>,
         rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
         fsm: FSM,
-        log_storage: C::LogStorage,
-        snapshot_storage: C::SnapshotStorage,
-        meta_client: C::MetaClient,
-        replica_client: C::ReplicaClient,
+        log_storage: LogStorageOf<C>,
+        snapshot_storage: SnapshotStorageOf<C>,
+        meta_client: MetaClientOf<C>,
+        replica_client: ReplicaClientOf<C>,
         replica_option: ReplicaOption,
     ) -> Self {
         let replica_option = Arc::new(replica_option);
@@ -157,7 +155,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    replica_id: ReplicaId<C>,
+    replica_id: ReplicaId<C::NodeId>,
     rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
     rx_notification: MpscUnboundedReceiverOf<C, NotificationMsg<C>>,
     core_notification: Arc<CoreNotification<C>>,
@@ -188,7 +186,7 @@ where
 
     async fn handle_transfer_primary(
         &mut self,
-        new_primary: ReplicaId<C>,
+        new_primary: ReplicaId<C::NodeId>,
         timeout: Duration,
     ) -> Result<(), PacificaError<C>> {
         let result = self.core_state.transfer_primary(new_primary, timeout).await;

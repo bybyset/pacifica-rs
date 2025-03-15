@@ -96,11 +96,3 @@ impl Default for StrNodeId {
 impl Eq for StrNodeId {}
 
 impl NodeIdEssential for StrNodeId {}
-
-
-
-// 示例用法
-fn main() {
-    let node_id = StrNodeId::new("node1".to_string());
-    println!("Node ID: {}", node_id); // 输出: Node ID: node1
-}

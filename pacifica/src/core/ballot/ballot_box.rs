@@ -79,7 +79,7 @@ where
     }
 
     /// cancel ballot
-    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         let pending_start_index = self.pending_index.load(Relaxed);
         let start_log_index = self.last_committed_index.load(Relaxed) + 1;
         let end_log_index = pending_start_index + self.ballot_queue.len() - 1;
@@ -94,7 +94,7 @@ where
     /// called by primary.
     pub(crate) fn ballot_by(
         &self,
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         start_log_index: usize,
         end_log_index: usize,
     ) -> Result<(), PacificaError<C>> {
@@ -139,7 +139,7 @@ where
 
     pub(crate) async fn caught_up(
         &self,
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         last_log_index: usize,
     ) -> Result<bool, CaughtUpError> {
         let (tx, rx) = C::oneshot();
@@ -273,7 +273,7 @@ where
         Ok(())
     }
 
-    fn handle_caught_up(&mut self, replica_id: ReplicaId<C>, last_log_index: usize) -> Result<bool, CaughtUpError> {
+    fn handle_caught_up(&mut self, replica_id: ReplicaId<C::NodeId>, last_log_index: usize) -> Result<bool, CaughtUpError> {
         // check
         if self.is_caught_up(last_log_index) {
             // 1. add secondary with meta
@@ -287,7 +287,7 @@ where
         Ok(false)
     }
 
-    fn do_recover_ballot(&mut self, replica_id: ReplicaId<C>, start_log_index: usize) {
+    fn do_recover_ballot(&mut self, replica_id: ReplicaId<C::NodeId>, start_log_index: usize) {
         assert!(start_log_index >= self.get_pending_index());
         assert!(start_log_index > self.get_last_committed_index());
 
@@ -383,7 +383,7 @@ where
     },
 
     CaughtUp {
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         last_log_index: usize,
         callback: ResultSender<C, bool, CaughtUpError>,
     },

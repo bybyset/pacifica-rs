@@ -2,7 +2,7 @@ use crate::{Replica, ReplicaId, StateMachine, TypeConfig};
 use std::collections::HashMap;
 
 pub trait ReplicaRouter {
-    fn replica<C, FSM>(&self, replica_id: &ReplicaId<C>) -> Option<Replica<C, FSM>>
+    fn replica<C, FSM>(&self, replica_id: &ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>
     where
         C: TypeConfig,
         FSM: StateMachine<C>;
@@ -13,7 +13,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    replica_container: HashMap<ReplicaId<C>, Replica<C, FSM>>,
+    replica_container: HashMap<ReplicaId<C::NodeId>, Replica<C, FSM>>,
 }
 
 impl<C, FSM> ReplicaManager<C, FSM>
@@ -27,17 +27,17 @@ where
         }
     }
 
-    pub fn register_replica(&mut self, replica_id: ReplicaId<C>, replica: Replica<C, FSM>) -> Option<Replica<C, FSM>> {
+    pub fn register_replica(&mut self, replica_id: ReplicaId<C::NodeId>, replica: Replica<C, FSM>) -> Option<Replica<C, FSM>> {
         self.replica_container.insert(replica_id, replica)
     }
 
-    pub fn unregister_replica(&mut self, replica_id: ReplicaId<C>) -> Option<Replica<C, FSM>> {
+    pub fn unregister_replica(&mut self, replica_id: ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>> {
         self.replica_container.remove(&replica_id)
     }
 }
 
 impl<C, FSM> ReplicaRouter for ReplicaManager<C, FSM> {
-    fn replica<C, FSM>(&self, replica_id: ReplicaId<C>) -> Option<Replica<C, FSM>>
+    fn replica<C, FSM>(&self, replica_id: ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>
     where
         C: TypeConfig,
         FSM: StateMachine<C>,

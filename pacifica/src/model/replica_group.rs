@@ -58,25 +58,25 @@ where
         }
     }
 
-    pub fn is_primary(&self, replica_id: ReplicaId<C>) -> bool {
+    pub fn is_primary(&self, replica_id: ReplicaId<C::NodeId>) -> bool {
         self.inner.primary.eq(replica_id.node_id())
     }
 
-    pub fn is_secondary(&self, replica_id: ReplicaId<C>) -> bool {
+    pub fn is_secondary(&self, replica_id: ReplicaId<C::NodeId>) -> bool {
         self.inner.secondaries.contains(replica_id.node_id())
     }
 
     /// get the primary of the current replica group
-    pub fn primary_id(&self) -> ReplicaId<C> {
+    pub fn primary_id(&self) -> ReplicaId<C::NodeId> {
         ReplicaId::new(self.inner.primary.clone(), self.inner.primary.clone())
     }
 
     /// get the secondary of the current replica group
-    pub fn secondary_ids(&self) -> Vec<ReplicaId<C>> {
+    pub fn secondary_ids(&self) -> Vec<ReplicaId<C::NodeId>> {
         self.inner
             .secondaries
             .iter()
-            .map(|node_id| ReplicaId::new(self.inner.primary.clone(), node_id.clone()))
+            .map(|node_id| ReplicaId::<C::NodeId>::new(self.inner.primary.clone(), node_id.clone()))
             .collect()
     }
 

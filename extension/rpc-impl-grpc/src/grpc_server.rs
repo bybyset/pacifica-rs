@@ -60,7 +60,7 @@ where
     async fn append_entries(&self, request: Request<AppendEntriesReq>) -> Result<Response<RpcResponse>, Status> {
         let mut req = request.into_inner();
         let replica_id = req.target_id.take();
-        let replica_id = ReplicaId::<C>::from(replica_id);
+        let replica_id = ReplicaId::<C::NodeId>::from(replica_id);
         let request: AppendEntriesRequest<C> = AppendEntriesRequest::from(req);
         let replica = self.check_get_replica(replica_id)?;
         let result = replica.handle_append_entries_request(request).await;
@@ -81,7 +81,7 @@ where
     async fn install_snapshot(&self, request: Request<InstallSnapshotReq>) -> Result<Response<RpcResponse>, Status> {
         let mut req = request.into_inner();
         let replica_id = req.target_id.take();
-        let replica_id = ReplicaId::<C>::from(replica_id);
+        let replica_id = ReplicaId::<C::NodeId>::from(replica_id);
         let request: InstallSnapshotRequest<C> = InstallSnapshotRequest::from(req);
         let replica = self.check_get_replica(replica_id)?;
         let result = replica.handle_install_snapshot_request(request).await;
@@ -102,7 +102,7 @@ where
     async fn replica_recover(&self, request: Request<ReplicaRecoverReq>) -> Result<Response<RpcResponse>, Status> {
         let mut req = request.into_inner();
         let replica_id = req.target_id.take();
-        let replica_id = ReplicaId::<C>::from(replica_id);
+        let replica_id = ReplicaId::<C::NodeId>::from(replica_id);
         let request: ReplicaRecoverRequest<C> = ReplicaRecoverRequest::from(req);
         let replica = self.check_get_replica(replica_id)?;
         let result = replica.handle_replica_recover_request(request).await;
@@ -123,7 +123,7 @@ where
     async fn transfer_primary(&self, request: Request<TransferPrimaryReq>) -> Result<Response<RpcResponse>, Status> {
         let mut req = request.into_inner();
         let replica_id = req.target_id.take();
-        let replica_id = ReplicaId::<C>::from(replica_id);
+        let replica_id = ReplicaId::<C::NodeId>::from(replica_id);
         let request: TransferPrimaryRequest<C> = TransferPrimaryRequest::from(req);
         let replica = self.check_get_replica(replica_id)?;
         let result = replica.handle_transfer_primary_request(request).await;
@@ -144,7 +144,7 @@ where
     async fn get_file(&self, request: Request<GetFileReq>) -> Result<Response<RpcResponse>, Status> {
         let mut req = request.into_inner();
         let replica_id = req.target_id.take();
-        let replica_id = ReplicaId::<C>::from(replica_id);
+        let replica_id = ReplicaId::<C::NodeId>::from(replica_id);
         let request: GetFileRequest = GetFileRequest::from(req);
         let replica = self.check_get_replica(replica_id)?;
         let result = replica.handle_get_file_request(request).await;

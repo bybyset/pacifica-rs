@@ -43,5 +43,5 @@ where C: TypeConfig {
     /// return AnyError if error
     async fn open_writer(&self) -> Result<Self::Writer, AnyError>;
 
-    async fn download_snapshot(&self, target_id: ReplicaId<C>, reader_id: usize) -> Result<(), AnyError>;
+    async fn download_snapshot(&self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError>;
 }

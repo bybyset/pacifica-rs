@@ -19,7 +19,7 @@ where
     GFC: GetFileClient<C>,
 {
     client: Arc<GFC>,
-    target_id: ReplicaId<C>,
+    target_id: ReplicaId<C::NodeId>,
     reader_id: usize,
     option: DownloadOption,
 }
@@ -44,7 +44,7 @@ where
     C: TypeConfig,
     GFC: GetFileClient<C>,
 {
-    pub fn new(client: Arc<GFC>, target_id: ReplicaId<C>, reader_id: usize, option: DownloadOption) -> Self<C> {
+    pub fn new(client: Arc<GFC>, target_id: ReplicaId<C::NodeId>, reader_id: usize, option: DownloadOption) -> Self<C> {
         FileDownloader {
             client,
             target_id,

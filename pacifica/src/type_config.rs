@@ -69,7 +69,9 @@ pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
     use crate::TypeConfig;
     use crate::{AsyncRuntime, LogStorage, SnapshotStorage};
-
+    pub type NodeIdOf<C> = <C as TypeConfig>::NodeId;
+    pub type MetaClientOf<C> = <C as TypeConfig>::MetaClient;
+    pub type ReplicaClientOf<C> = <C as TypeConfig>::ReplicaClient;
     pub type AsyncRuntimeOf<C> = <C as TypeConfig>::AsyncRuntime;
 
     type RT<C> = AsyncRuntimeOf<C>;

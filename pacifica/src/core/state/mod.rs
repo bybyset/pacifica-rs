@@ -199,7 +199,7 @@ where
 
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C::NodeId>, timeout: Duration) -> Result<(), PacificaError<C>> {
         match self {
             CoreState::Primary { state } => state.transfer_primary(new_primary, timeout).await,
             _ => Err(PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(

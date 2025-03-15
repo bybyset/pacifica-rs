@@ -147,7 +147,7 @@ where
         Ok(InstallSnapshotResponse::Success)
     }
 
-    async fn do_snapshot_download(&mut self, target_id: ReplicaId<C>, download_id: usize) -> Result<(), StorageError> {
+    async fn do_snapshot_download(&mut self, target_id: ReplicaId<C::NodeId>, download_id: usize) -> Result<(), StorageError> {
         self.snapshot_storage.download_snapshot(target_id, download_id).await.map_err(|e| {
             StorageError::download_snapshot(download_id, e)
         })?;

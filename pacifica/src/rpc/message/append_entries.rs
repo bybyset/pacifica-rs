@@ -1,9 +1,10 @@
 use crate::{LogEntry, TypeConfig};
 use crate::{LogId, ReplicaId};
+use crate::type_config::alias::NodeIdOf;
 
 pub struct AppendEntriesRequest<C>
 where C:TypeConfig {
-    pub primary_id: ReplicaId<C>,
+    pub primary_id: ReplicaId<NodeIdOf<C>>,
     pub term: usize,
     pub version: usize,
     pub prev_log_id: LogId,
@@ -14,11 +15,11 @@ where C:TypeConfig {
 
 impl<C> AppendEntriesRequest<C>
 where C:TypeConfig {
-    pub fn with_no_entries(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
+    pub fn with_no_entries(primary_id: ReplicaId<NodeIdOf<C>>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId) -> Self {
         Self::with_entries(primary_id, term, version, committed_index, prev_log_id, vec![])
     }
 
-    pub fn with_entries(primary_id: ReplicaId<C>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId, entries: Vec<LogEntry>) -> Self {
+    pub fn with_entries(primary_id: ReplicaId<NodeIdOf<C>>, term: usize, version: usize, committed_index: usize, prev_log_id: LogId, entries: Vec<LogEntry>) -> Self {
         Self {
             primary_id,
             term,

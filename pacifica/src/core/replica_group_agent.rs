@@ -16,7 +16,7 @@ pub(crate) struct ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    current_id: ReplicaId<C>,
+    current_id: ReplicaId<C::NodeId>,
     meta_client: C::MetaClient,
     replica_group: Option<ReplicaGroup<C>>,
 
@@ -29,7 +29,7 @@ impl<C> ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(current_id: ReplicaId<C>, meta_client: C::MetaClient) -> Self {
+    pub(crate) fn new(current_id: ReplicaId<C::NodeId>, meta_client: C::MetaClient) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         ReplicaGroupAgent {
             current_id,
@@ -135,7 +135,7 @@ where
         result
     }
 
-    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
+    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), MetaError> {
         let mut replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.remove_secondary(replica_id.clone(), replica_group.version()).await;
         if result.is_ok() {
@@ -145,7 +145,7 @@ where
         result
     }
 
-    async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C>) -> Result<(), MetaError> {
+    async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), MetaError> {
         let mut replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.add_secondary(replica_id.clone(), replica_group.version()).await;
         if result.is_ok() {
@@ -171,13 +171,13 @@ where
         self.get_state(self.current_id.clone()).await
     }
 
-    pub(crate) async fn is_secondary(&self, replica_id: ReplicaId<C>) -> Result<bool, MetaError> {
+    pub(crate) async fn is_secondary(&self, replica_id: ReplicaId<C::NodeId>) -> Result<bool, MetaError> {
         let replica_group = self.get_replica_group().await?;
         let result = replica_group.is_secondary(replica_id);
         Ok(result)
     }
 
-    pub(crate) async fn get_state(&self, replica_id: ReplicaId<C>) -> ReplicaState {
+    pub(crate) async fn get_state(&self, replica_id: ReplicaId<C::NodeId>) -> ReplicaState {
         let replica_group = self.get_replica_group().await;
         if let Ok(replica_group) = replica_group {
             if replica_group.is_primary(replica_id.clone()) {
@@ -206,7 +206,7 @@ where
         result
     }
 
-    pub(crate) async fn remove_secondary(&self, removed: ReplicaId<C>) -> bool {
+    pub(crate) async fn remove_secondary(&self, removed: ReplicaId<C::NodeId>) -> bool {
         let (tx, rx) = C::oneshot();
         let _ = self.tx_task.send(Task::RemoveSecondary {
             replica_id: removed.clone(),
@@ -225,7 +225,7 @@ where
         }
     }
 
-    pub(crate) async fn add_secondary(&self, replica_id: ReplicaId<C>) -> bool {
+    pub(crate) async fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>) -> bool {
         let (tx, rx) = C::oneshot();
         let _ = self.tx_task.send(Task::AddSecondary {
             replica_id,
@@ -244,13 +244,10 @@ where
         }
     }
 
-    pub(crate) fn current_id(&self) -> ReplicaId<C> {
+    pub(crate) fn current_id(&self) -> ReplicaId<C::NodeId> {
         self.current_id.clone()
     }
 
-    pub(crate) fn get_term(&self) -> usize {
-        todo!()
-    }
 }
 
 impl<C> Lifecycle<C> for ReplicaGroupAgent<C>
@@ -308,11 +305,11 @@ where
         callback: ResultSender<C, (), MetaError>,
     },
     RemoveSecondary {
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         callback: ResultSender<C, (), MetaError>,
     },
     AddSecondary {
-        replica_id: ReplicaId<C>,
+        replica_id: ReplicaId<C::NodeId>,
         callback: ResultSender<C, (), MetaError>,
     },
 }

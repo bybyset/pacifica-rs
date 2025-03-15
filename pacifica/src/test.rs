@@ -131,7 +131,7 @@ pub mod tests {
             Ok(MockSnapshotWriter{})
         }
 
-        async fn download_snapshot(&self, _target_id: ReplicaId<C>, _reader_id: usize) -> Result<(), AnyError> {
+        async fn download_snapshot(&self, _target_id: ReplicaId<C::NodeId>, _reader_id: usize) -> Result<(), AnyError> {
             Ok(())
         }
     }
@@ -144,15 +144,15 @@ pub mod tests {
             Err(MetaError::Timeout)
         }
 
-        async fn add_secondary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError> {
+        async fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
 
-        async fn remove_secondary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError> {
+        async fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
 
-        async fn change_primary(&self, replica_id: ReplicaId<C>, version: usize) -> Result<(), MetaError> {
+        async fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
     }
@@ -163,25 +163,25 @@ pub mod tests {
     impl<C: TypeConfig> ConnectionClient<C> for MockPacificaClient {}
 
     impl<C: TypeConfig> ReplicaClient<C> for MockPacificaClient {
-        async fn append_entries(&self, target: ReplicaId<C>, request: AppendEntriesRequest<C>, rpc_option: RpcOption) -> Result<AppendEntriesResponse, RpcClientError> {
+        async fn append_entries(&self, target: ReplicaId<C::NodeId>, request: AppendEntriesRequest<C>, rpc_option: RpcOption) -> Result<AppendEntriesResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn install_snapshot(&self, target_id: ReplicaId<C>, request: InstallSnapshotRequest<C>, rpc_option: RpcOption) -> Result<InstallSnapshotResponse, RpcClientError> {
+        async fn install_snapshot(&self, target_id: ReplicaId<C::NodeId>, request: InstallSnapshotRequest<C>, rpc_option: RpcOption) -> Result<InstallSnapshotResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn replica_recover(&self, primary_id: ReplicaId<C>, request: ReplicaRecoverRequest<C>, rpc_option: RpcOption) -> Result<ReplicaRecoverResponse, RpcClientError> {
+        async fn replica_recover(&self, primary_id: ReplicaId<C::NodeId>, request: ReplicaRecoverRequest<C>, rpc_option: RpcOption) -> Result<ReplicaRecoverResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn transfer_primary(&self, secondary_id: ReplicaId<C>, request: TransferPrimaryRequest<C>, rpc_option: RpcOption) -> Result<TransferPrimaryResponse, RpcClientError> {
+        async fn transfer_primary(&self, secondary_id: ReplicaId<C::NodeId>, request: TransferPrimaryRequest<C>, rpc_option: RpcOption) -> Result<TransferPrimaryResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )

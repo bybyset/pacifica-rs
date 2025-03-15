@@ -31,8 +31,8 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    primary_id: ReplicaId<C>,
-    target_id: ReplicaId<C>,
+    primary_id: ReplicaId<C::NodeId>,
+    target_id: ReplicaId<C::NodeId>,
     replicator_type: ReplicatorType,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
@@ -60,8 +60,8 @@ where
     FSM: StateMachine<C>,
 {
     pub(crate) fn new(
-        primary_id: ReplicaId<C>,
-        target_id: ReplicaId<C>,
+        primary_id: ReplicaId<C::NodeId>,
+        target_id: ReplicaId<C::NodeId>,
         replicator_type: ReplicatorType,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
@@ -167,7 +167,7 @@ where
     }
 
     ///
-    pub(crate) fn get_target_id(&self) -> ReplicaId<C> {
+    pub(crate) fn get_target_id(&self) -> ReplicaId<C::NodeId> {
         self.target_id.clone()
     }
 

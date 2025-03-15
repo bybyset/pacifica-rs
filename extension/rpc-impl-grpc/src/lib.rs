@@ -34,16 +34,16 @@ where
     }
 }
 
-impl<C> Into<ReplicaId<C>> for ReplicaIdProto
+impl<C> Into<ReplicaId<C::NodeId>> for ReplicaIdProto
 where
     C: TypeConfig,
 {
     fn into(self) -> ReplicaId<C> {
-        ReplicaId::<C>::from(self)
+        ReplicaId::<C::NodeId>::from(self)
     }
 }
 
-impl<C> From<ReplicaIdProto> for ReplicaId<C>
+impl<C> From<ReplicaIdProto> for ReplicaId<C::NodeId>
 where
     C: TypeConfig,
 {
@@ -55,7 +55,7 @@ where
     }
 }
 
-impl<C> Into<ReplicaIdProto> for ReplicaId<C>
+impl<C> Into<ReplicaIdProto> for ReplicaId<C::NodeId>
 where
     C: TypeConfig,
 {
@@ -117,7 +117,7 @@ where
     C: TypeConfig,
 {
     fn from(value: AppendEntriesReq) -> Self {
-        let primary_id = ReplicaId::from(value.primary.unwrap());
+        let primary_id = ReplicaId::<C::NodeId>::from(value.primary.unwrap());
         let term = value.term as usize;
         let version = value.version as usize;
         let prev_log_id = LogId::from(value.prev_log.unwrap());
@@ -136,7 +136,7 @@ where
     C: TypeConfig,
 {
     fn from(value: InstallSnapshotReq) -> Self {
-        let primary_id = ReplicaId::from(value.primary.unwrap());
+        let primary_id = ReplicaId::<C::NodeId>::from(value.primary.unwrap());
         let term = value.term as usize;
         let version = value.version as usize;
         let snapshot_log_id = LogId::from(value.snapshot_log_id.unwrap());
@@ -163,7 +163,7 @@ where
     C: TypeConfig,
 {
     fn from(value: TransferPrimaryReq) -> Self {
-        let new_primary = ReplicaId::from(value.new_primary.unwrap());
+        let new_primary = ReplicaId::<C::NodeId>::from(value.new_primary.unwrap());
         let term = value.term as usize;
         let version = value.version as usize;
 

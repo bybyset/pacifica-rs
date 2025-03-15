@@ -57,7 +57,7 @@ where
 {
     async fn get_file(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         request: GetFileRequest,
         rpc_option: RpcOption,
     ) -> Result<GetFileResponse, RpcClientError>;

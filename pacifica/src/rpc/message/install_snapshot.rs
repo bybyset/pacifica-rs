@@ -4,7 +4,7 @@ pub struct InstallSnapshotRequest<C>
 where
     C: TypeConfig,
 {
-    pub primary_id: ReplicaId<C>,
+    pub primary_id: ReplicaId<C::NodeId>,
     pub term: usize,
     pub version: usize,
     pub snapshot_log_id: LogId,
@@ -15,7 +15,7 @@ impl<C> InstallSnapshotRequest<C>
 where
     C: TypeConfig,
 {
-    pub fn new(primary_id: ReplicaId<C>, term: usize, version: usize, log_id: LogId, read_id: usize) -> Self {
+    pub fn new(primary_id: ReplicaId<C::NodeId>, term: usize, version: usize, log_id: LogId, read_id: usize) -> Self {
         InstallSnapshotRequest {
             primary_id,
             term,

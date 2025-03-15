@@ -112,7 +112,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C>, timeout: Duration) -> Result<(), PacificaError<C>> {
+    pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C::NodeId>, timeout: Duration) -> Result<(), PacificaError<C>> {
         // 1 check replica state
         let replica_state = self.replica_group_agent.get_state(new_primary.clone()).await;
         if !replica_state.is_secondary() {
@@ -176,7 +176,7 @@ where
             for replica_id in replica_ids.into_iter() {
                 if !self.replicator_group.is_alive(replica_id) {
                     tracing::info!("");
-                    let secondary_id = ReplicaId::new(replica_id.group_name(), replica_id.node_id());
+                    let secondary_id = ReplicaId::<C::NodeId>::new(replica_id.group_name(), replica_id.node_id());
                     if self.replica_group_agent.remove_secondary(secondary_id.clone()) {
                         // cancel ballot about it
                         let _ = self.ballot_box.cancel_ballot(secondary_id.clone());
