@@ -1,22 +1,23 @@
+use std::future::Future;
 use crate::config_cluster::MetaError;
 use crate::{ReplicaGroup, TypeConfig};
 use crate::ReplicaId;
 
 /// Complete the interaction with the configuration cluster
 ///
-pub trait MetaClient<C>
+pub trait MetaClient<C>: Send + Sync
 where C: TypeConfig {
 
     /// get replica group by group name
     ///
-    async fn get_replica_group(&self, group_name: impl AsRef<str>) -> Result<ReplicaGroup<C>, MetaError>;
+    fn get_replica_group(&self, group_name: impl AsRef<str>) -> impl Future<Output = Result<ReplicaGroup<C>, MetaError>> + Send;
 
     ///
-    async fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
+    fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
-    async fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
+    fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
-    async fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError>;
+    fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
 
 

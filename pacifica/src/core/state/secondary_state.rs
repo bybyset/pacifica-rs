@@ -91,7 +91,7 @@ where
         Ok(())
     }
 
-    fn check_grace_period(&self) -> Result<(), LifeCycleError<C>> {
+    fn check_grace_period(&self) -> Result<(), LifeCycleError> {
         if self.grace_period.is_expired(C::now()) {
             // 检测到主副本故障，竞争推选自己做为新的主副本
             let result = self.handle_elect_self();

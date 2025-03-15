@@ -97,6 +97,8 @@ pub mod alias {
     pub type OneshotOf<C> = <RT<C> as AsyncRuntime>::Oneshot;
     pub type OneshotSenderOf<C, T> = <OneshotOf<C> as Oneshot>::Sender<T>;
     pub type OneshotReceiverOf<C, T> = <OneshotOf<C> as Oneshot>::Receiver<T>;
+    pub type OneshotReceiverErrorOf<C> = <OneshotOf<C> as Oneshot>::ReceiverError;
+
 
     pub type WatchOf<C> = <RT<C> as AsyncRuntime>::Watch;
     pub type WatchSenderOf<C, T> = <WatchOf<C> as Watch>::Sender<T>;

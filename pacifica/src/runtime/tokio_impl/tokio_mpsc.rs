@@ -15,14 +15,16 @@ impl Mpsc for TokioMpsc {
     }
 }
 
-impl<T> MpscSender<T> for mpsc::Sender<T> {
+impl<T> MpscSender<T> for mpsc::Sender<T>
+where T: Send {
     #[inline]
     fn send(&self, msg: T) -> impl Future<Output = Result<(), SendError<T>>> + Send {
         self.send(msg).map_err(|e| SendError(e.0))
     }
 }
 
-impl<T> MpscReceiver<T> for mpsc::Receiver<T> {
+impl<T> MpscReceiver<T> for mpsc::Receiver<T>
+where T: Send {
     #[inline]
     fn recv(&mut self) -> impl Future<Output = Option<T>> + Send {
         self.recv()

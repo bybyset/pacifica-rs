@@ -14,14 +14,16 @@ impl MpscUnbounded for TokioMpscUnbounded {
     }
 }
 
-impl<T> MpscUnboundedSender<T> for mpsc::UnboundedSender<T> {
+impl<T> MpscUnboundedSender<T> for mpsc::UnboundedSender<T>
+where T: Send {
     #[inline]
     fn send(&self, msg: T) -> Result<(), SendError<T>> {
         self.send(msg).map_err(|e| SendError(e.0))
     }
 }
 
-impl<T> MpscUnboundedReceiver<T> for mpsc::UnboundedReceiver<T> {
+impl<T> MpscUnboundedReceiver<T> for mpsc::UnboundedReceiver<T>
+where T: Send {
     #[inline]
     fn recv(&mut self) -> impl Future<Output = Option<T>> + Send {
         self.recv()

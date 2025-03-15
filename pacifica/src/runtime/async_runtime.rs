@@ -7,7 +7,7 @@ use std::fmt::{Debug, Display};
 use std::future::Future;
 use std::time::Duration;
 
-pub trait AsyncRuntime {
+pub trait AsyncRuntime: Debug + Default + PartialEq + Eq + Send + Sync + 'static  {
     type Instant: Instant;
     type Sleep: Future<Output = ()> + Send + Sync;
     type TimeoutError: Debug + Display + Send;

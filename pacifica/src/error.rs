@@ -10,6 +10,7 @@ use crate::fsm::UserStateMachineError;
 pub use crate::rpc::ConnectError;
 pub use crate::rpc::RpcClientError;
 pub use crate::rpc::RpcServiceError;
+use crate::type_config::alias::{OneshotReceiverErrorOf, OneshotReceiverOf};
 
 #[derive(Debug)]
 pub enum Fatal {
@@ -105,6 +106,8 @@ where
     NotFoundReplicator,
     #[error("Api timeout")]
     ApiTimeout,
+    #[error(transparent)]
+    ReceiverError(#[from] OneshotReceiverErrorOf<C>)
 }
 
 

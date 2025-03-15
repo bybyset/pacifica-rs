@@ -356,10 +356,10 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn run_loop(mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
+    async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         loop {
             futures::select_biased! {
-                _ = rx_shutdown.recv().fuse() =>{
+                _ = (&mut rx_shutdown).fuse() =>{
                     tracing::info!("ReplicaCore received shutdown signal.");
                     break;
                 }
@@ -391,6 +391,7 @@ where
 
             }
         }
+        Ok(())
     }
 }
 

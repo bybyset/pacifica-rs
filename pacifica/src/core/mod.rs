@@ -1,4 +1,4 @@
-use crate::type_config::alias::OneshotSenderOf;
+use crate::type_config::alias::{OneshotReceiverOf, OneshotSenderOf};
 
 pub(crate) mod pacifica_core;
 pub(crate) mod replica_msg;
@@ -16,6 +16,7 @@ mod task_sender;
 mod core_notification;
 mod caught_up;
 pub(crate) type ResultSender<C, T, E> = OneshotSenderOf<C, Result<T, E>>;
+pub(crate) type ResultReceiver<C, T, E> = OneshotReceiverOf<C, Result<T, E>>;
 
 pub(crate) use self::state::CoreState;
 
@@ -27,6 +28,5 @@ pub(crate) use self::core_notification::CoreNotification;
 
 pub(crate) use self::caught_up::CaughtUpError;
 
-pub(crate) use self::log::LogManagerError;
 
 

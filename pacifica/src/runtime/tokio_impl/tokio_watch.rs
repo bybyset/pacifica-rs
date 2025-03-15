@@ -22,8 +22,13 @@ where
     }
 }
 
-impl<T> WatchReceiver<T> for watch::Receiver<T> {
+impl<T> WatchReceiver<T> for watch::Receiver<T>
+where T: Send + Sync {
+
     async fn changed(&mut self) -> Result<(), RecvError> {
-        self.changed()
+        self.changed().await.map_err(|_| {
+            RecvError(())
+        })?;
+        Ok(())
     }
 }
