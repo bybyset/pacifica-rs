@@ -1,7 +1,7 @@
 use crate::LogEntry;
 use anyerror::AnyError;
 
-pub trait LogReader {
+pub trait LogReader: Send + Sync {
     /// get first log index
     /// 如果没有任何日志，则返回None
     /// 若发生了异常，则返回AnyError

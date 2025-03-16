@@ -4,7 +4,7 @@ use crate::{LogEntry};
 /// To improve the performance of writing op logs, we will write multiple op logs in batches.
 /// writer is opened first for each write, and then the op log is written in order,
 /// and [flush()] is called at the end of the write batch to dump the op log for this batch
-pub trait LogWriter {
+pub trait LogWriter: Send + Sync {
     async fn append_entry(&mut self, entry: LogEntry) -> Result<(), AnyError>;
 
     /// Delete logs from storage's head, [first_log_index, first_index_kept) will be discarded.

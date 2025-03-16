@@ -286,7 +286,7 @@ where
     /// get term of LogId(log_index)
     /// return NOT_FOUND_TERM if log_index is 0
     /// return NOT_FOUND_TERM if not found LogEntry at log_index
-    pub(crate) async fn get_log_term_at(&self, log_index: usize) -> Result<usize, LogManagerError<C>> {
+    pub(crate) async fn get_log_term_at(&self, log_index: usize) -> Result<usize, LogManagerError> {
         if log_index <= NOT_FOUND_INDEX {
             return Ok(NOT_FOUND_TERM);
         }

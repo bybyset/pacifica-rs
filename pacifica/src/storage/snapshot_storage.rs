@@ -3,7 +3,7 @@ use crate::{LogId, ReplicaId, TypeConfig};
 use crate::storage::GetFileService;
 use crate::util::Closeable;
 
-pub trait SnapshotReader: Closeable {
+pub trait SnapshotReader: Closeable + Send + Sync + 'static{
 
     /// return snapshot LogId
     fn read_snapshot_log_id(&self) -> Result<LogId, AnyError>;
@@ -14,7 +14,7 @@ pub trait SnapshotReader: Closeable {
 }
 
 
-pub trait SnapshotWriter: Closeable {
+pub trait SnapshotWriter: Closeable + Send + Sync + 'static{
     /// write snapshot log id
     ///
     fn write_snapshot_log_id(&mut self, log_id: LogId) -> Result<(), AnyError>;
@@ -29,7 +29,7 @@ pub trait SnapshotWriter: Closeable {
 
 }
 
-pub trait SnapshotStorage<C>: GetFileService<C>
+pub trait SnapshotStorage<C>: GetFileService<C> + Send + Sync + 'static
 where C: TypeConfig {
     type Reader: SnapshotReader;
     type Writer: SnapshotWriter;

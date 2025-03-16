@@ -1,32 +1,33 @@
+use std::marker::PhantomData;
 use futures::FutureExt;
 use crate::runtime::{MpscUnboundedSender, OneshotSender, TypeConfigExt};
-use crate::type_config::alias::{JoinHandleOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf};
+use crate::type_config::alias::{JoinHandleOf,OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub trait TickFactory: Send + 'static {
-    type Tick: Send;
+pub trait RepeatedTask: Send + 'static {
+    async fn execute(&mut self);
 
-    fn new_tick(&mut self) -> Self::Tick;
 }
+
 
 struct Context<C, T>
 where
     C: TypeConfig,
-    T: TickFactory,
+    T: RepeatedTask,
 {
-    tick_factory: T,
+    task: T,
     interval: Duration,
-    tx: MpscUnboundedSenderOf<C, T::Tick>,
     enable: Arc<AtomicBool>,
+    phantom_data: PhantomData<C>
 }
 
 impl<C, T> Context<C, T>
 where
     C: TypeConfig,
-    T: TickFactory,
+    T: RepeatedTask,
 {
     pub async fn schedule(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), ()>{
         loop {
@@ -45,16 +46,7 @@ where
                 // turn off
                 continue;
             }
-
-            // send tick
-            let tick = self.tick_factory.new_tick();
-            let send_res = self.tx.send(tick);
-
-            if let Err(e) = send_res {
-                tracing::error!("Failed to send tick, may be stopped. err={}", e);
-                break;
-            }
-            // send success
+            self.task.execute().await;
         }
         Ok(())
     }
@@ -73,13 +65,13 @@ impl<C> RepeatedTimer<C>
 where
     C: TypeConfig,
 {
-    pub fn new<T: TickFactory>(tick_factory: T, interval: Duration, tx: MpscUnboundedSenderOf<C, T::Tick>, enable: bool) -> Self {
+    pub fn new<T: RepeatedTask>(task: T, interval: Duration, enable: bool) -> Self {
         let enable = Arc::new(AtomicBool::new(enable));
-        let context: Context::<C, T> = Context::<C, T> {
-            tick_factory,
+        let context: Context<C, T> = Context::<C, T> {
+            task,
             interval,
-            tx,
             enable: enable.clone(),
+            phantom_data: PhantomData,
         };
         let (tx_shutdown, rx_shutdown) = C::oneshot();
         let schedule_handle = C::spawn(context.schedule(rx_shutdown));
@@ -106,7 +98,7 @@ where
         self.enable(true);
     }
 
-    /// Signal the RepeatedTimer to shutdown. And return a JoinHandle to wait for the RepeatedTimer to shutdown.
+    /// Signal the RepeatedTimer to shut down. And return a JoinHandle to wait for the RepeatedTimer to shut down.
     /// If it is called twice, the second call will return None.
     pub fn shutdown(&self) -> Option<JoinHandleOf<C, Result<(), ()>>> {
         let shutdown = {

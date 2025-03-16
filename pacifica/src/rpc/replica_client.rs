@@ -1,3 +1,4 @@
+use std::future::Future;
 use crate::rpc::message::AppendEntriesRequest;
 use crate::rpc::message::AppendEntriesResponse;
 use crate::rpc::message::InstallSnapshotRequest;
@@ -45,7 +46,7 @@ where C: TypeConfig {
 
 
 
-pub trait ReplicaClient<C>: ConnectionClient<C>
+pub trait ReplicaClient<C>: ConnectionClient<C> + Send + Sync
 where
     C: TypeConfig,
 {
@@ -63,12 +64,12 @@ where
         rpc_option: RpcOption,
     ) -> Result<InstallSnapshotResponse, RpcClientError>;
 
-    async fn replica_recover(
+    fn replica_recover(
         &self,
         primary_id: ReplicaId<C::NodeId>,
         request: ReplicaRecoverRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<ReplicaRecoverResponse, RpcClientError>;
+    ) -> impl Future<Output = Result<ReplicaRecoverResponse, RpcClientError>> + Send;
 
     async fn transfer_primary(
         &self,

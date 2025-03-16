@@ -1,10 +1,10 @@
-use crate::error::{Fatal, LifeCycleError, PacificaError};
+use crate::error::{Fatal};
 use crate::fsm::entry::Entry;
 use crate::type_config::alias::{SnapshotReaderOf, SnapshotWriteOf};
 use crate::TypeConfig;
 use anyerror::AnyError;
 
-pub trait StateMachine<C>
+pub trait StateMachine<C> : Send + Sync + 'static
 where
     C: TypeConfig,
 {
@@ -20,7 +20,7 @@ where
         results
     }
 
-    async fn on_commit_entry(&self, entry: Entry<C>) -> Result<C::Response, AnyError> {
+    async fn on_commit_entry(&self, _entry: Entry<C>) -> Result<C::Response, AnyError> {
         Err(AnyError::error("Not implemented"))
     }
 

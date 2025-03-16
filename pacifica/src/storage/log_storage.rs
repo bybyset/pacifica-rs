@@ -1,10 +1,10 @@
 use anyerror::AnyError;
-use crate::LogEntry;
+use crate::{LogEntry};
 use crate::storage::log_entry_codec::LogEntryCodec;
 use crate::storage::log_reader::LogReader;
 use crate::storage::log_writer::LogWriter;
 
-pub trait LogStorage {
+pub trait LogStorage: Send + Sync {
 
     type Writer: LogWriter;
 

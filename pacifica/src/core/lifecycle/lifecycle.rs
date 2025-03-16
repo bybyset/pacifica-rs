@@ -12,10 +12,10 @@ where
 {
     /// phase: startup
     /// return ture if success startup.
-    async fn startup(&mut self) -> Result<(), LifeCycleError>;
+    async fn startup(&self) -> Result<(), LifeCycleError>;
 
     /// phase: shutdown
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError>;
+    async fn shutdown(&self) -> Result<(), LifeCycleError>;
 }
 
 pub(crate) trait LoopHandler<C>
@@ -32,7 +32,7 @@ where
 {
     type LoopHandler: LoopHandler<C> + Send + Sync + 'static;
 
-    fn new_loop_handler(&mut self) -> Option<Self::LoopHandler>;
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler>;
 }
 
 pub(crate) struct ReplicaComponent<C, T>
@@ -41,7 +41,7 @@ where
     T: Component<C> + Sized,
 {
     tx_shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    join_handler: Option<JoinHandleOf<C, Result<(), LifeCycleError>>>,
+    join_handler: Mutex<Option<JoinHandleOf<C, Result<(), LifeCycleError>>>>,
     component: T,
 }
 
@@ -64,7 +64,7 @@ where
     C: TypeConfig,
     T: Component<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError> {
+    async fn startup(&self) -> Result<(), LifeCycleError> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match *shutdown {
             Some(_) => {
@@ -77,7 +77,7 @@ where
                 match loop_handler {
                     Some(loop_handler) => {
                         let join_handler = C::spawn(loop_handler.run_loop(rx_shutdown));
-                        self.join_handler.replace(join_handler);
+                        self.join_handler.lock().unwrap().replace(join_handler);
                         shutdown.replace(tx_shutdown);
                     }
                     None => {}
@@ -88,7 +88,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         let shutdown = shutdown.take();
         match shutdown {
@@ -100,7 +100,7 @@ where
                 // send shutdown msg
                 let _ = tx_shutdown.send(());
                 // wait
-                if let Some(loop_handler) = self.join_handler.take() {
+                if let Some(loop_handler) = self.join_handler.lock().unwrap().take() {
                     let _ = loop_handler.await;
                 }
                 self.component.shutdown().await?;

@@ -91,7 +91,7 @@ where
             return Err(ReadFileError::NotFoundFile { filename });
         }
         let snapshot_dir_path = self.fs_snapshot_reader.snapshot_dir();
-        let read_file_path = PathBuf::from(snapshot_dir_path).join(filename.as_str()).as_path();
+        let read_file_path = PathBuf::from(snapshot_dir_path).join(filename.as_str());
         let mut read_file = File::open(read_file_path).map_err(|e| ReadFileError::ReadError { source: e })?;
         let file_meta = read_file.metadata().map_err(|e| ReadFileError::ReadError { source: e })?;
         let file_len = file_meta.len();

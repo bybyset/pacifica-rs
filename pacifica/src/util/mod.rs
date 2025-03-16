@@ -11,7 +11,7 @@ pub use self::instant::TokioInstant;
 
 
 pub use self::repeated_timer::RepeatedTimer;
-pub use self::repeated_timer::TickFactory;
+pub use self::repeated_timer::RepeatedTask;
 
 
 pub use self::utils::send_result;

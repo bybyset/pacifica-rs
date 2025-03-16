@@ -61,22 +61,22 @@ where
     }
 
     pub(crate) async fn get_self_state(&self) -> ReplicaState {
-        self.get_state(self.current_id.clone()).await
+        self.get_state(&self.current_id).await
     }
 
-    pub(crate) async fn is_secondary(&self, replica_id: ReplicaId<C::NodeId>) -> Result<bool, PacificaError<C>> {
+    pub(crate) async fn is_secondary(&self, replica_id: &ReplicaId<C::NodeId>) -> Result<bool, PacificaError<C>> {
         let replica_group = self.get_replica_group().await?;
-        let result = replica_group.is_secondary(replica_id);
+        let result = replica_group.is_secondary(&replica_id);
         Ok(result)
     }
 
-    pub(crate) async fn get_state(&self, replica_id: ReplicaId<C::NodeId>) -> ReplicaState {
+    pub(crate) async fn get_state(&self, replica_id: &ReplicaId<C::NodeId>) -> ReplicaState {
         let replica_group = self.get_replica_group().await;
         if let Ok(replica_group) = replica_group {
-            if replica_group.is_primary(replica_id.clone()) {
+            if replica_group.is_primary(&replica_id) {
                 return ReplicaState::Primary;
             }
-            if replica_group.is_secondary(replica_id.clone()) {
+            if replica_group.is_secondary(&replica_id) {
                 return ReplicaState::Secondary;
             }
             ReplicaState::Candidate

@@ -289,12 +289,12 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn startup(&self) -> Result<(), LifeCycleError> {
 
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }
 }

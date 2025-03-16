@@ -107,10 +107,10 @@ where
         replica_option: Arc<ReplicaOption>,
     ) -> Self<C, FSM> {
         let state = CandidateState::new(
-            fsm_caller,
-            log_manager,
-            replica_group_agent,
             replica_client,
+            log_manager,
+            fsm_caller,
+            replica_group_agent,
             core_notification,
             replica_option,
         );
@@ -270,7 +270,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn startup(&mut self) -> Result<(), LifeCycleError> {
         match self {
             CoreState::Primary { state: primary } => primary.startup().await,
             CoreState::Secondary { state } => state.startup().await,
@@ -280,7 +280,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
+    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
         match self {
             CoreState::Primary { state: primary } => primary.shutdown().await,
             CoreState::Secondary { state } => state.shutdown().await,
