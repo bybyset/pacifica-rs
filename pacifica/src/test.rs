@@ -1,21 +1,18 @@
 
 #[cfg(test)]
 pub mod tests {
-    use std::cmp::Ordering;
-    use std::fmt::{Display, Formatter};
-    use std::hash::{Hash, Hasher};
-    use std::sync::Arc;
-    use anyerror::AnyError;
-    use bytes::Bytes;
-    use crate::{DefaultLogEntryCodec, LogEntry, LogId, LogReader, LogStorage, LogWriter, NodeId, ReplicaGroup, ReplicaId, Request, SnapshotStorage, TypeConfig};
     use crate::config_cluster::{MetaClient, MetaError};
     use crate::error::{RpcClientError, RpcServiceError};
     use crate::pacifica::{Codec, DecodeError, EncodeError, Response};
     use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
     use crate::rpc::{ConnectionClient, ReplicaClient, RpcOption};
     use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotReader, SnapshotWriter};
-    use crate::type_config::NodeIdEssential;
     use crate::util::Closeable;
+    use crate::{DefaultLogEntryCodec, LogEntry, LogId, LogReader, LogStorage, LogWriter, ReplicaGroup, ReplicaId, Request, SnapshotStorage, TypeConfig};
+    use anyerror::AnyError;
+    use bytes::Bytes;
+    use std::fmt::Display;
+    use std::hash::Hash;
 
 
     pub(crate) struct MockLogStorage;
@@ -210,54 +207,6 @@ pub mod tests {
         fn decode(bytes: Bytes) -> Result<MockRequest, DecodeError> {
             Ok(MockRequest)
         }
-    }
-
-
-    #[derive(Debug, Clone, Default, PartialEq, Eq, Ord, PartialOrd, Hash)]
-    pub(crate) struct MockNodeId {
-        pub(crate) id: Arc<String>
-    }
-
-    impl From<String> for MockNodeId {
-        fn from(value: String) -> Self {
-            todo!()
-        }
-    }
-
-    impl Into<String> for MockNodeId {
-        fn into(self) -> String {
-            todo!()
-        }
-    }
-
-
-
-
-
-    impl Copy for MockNodeId {}
-
-    impl NodeIdEssential for MockNodeId {}
-
-    impl PartialEq<Self> for MockNodeId {
-        fn eq(&self, other: &Self) -> bool {
-            todo!()
-        }
-    }
-
-    impl PartialOrd<Self> for MockNodeId {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            todo!()
-        }
-    }
-
-    impl Display for MockNodeId {
-        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            todo!()
-        }
-    }
-
-    impl NodeId for MockNodeId {
-
     }
 
 

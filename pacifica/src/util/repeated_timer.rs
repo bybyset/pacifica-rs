@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use crate::runtime::{MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{JoinHandleOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
@@ -5,10 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub trait TickFactory {
+pub trait TickFactory: Send + 'static {
     type Tick: Send;
 
-    fn new_tick() -> Self::Tick;
+    fn new_tick(&mut self) -> Self::Tick;
 }
 
 struct Context<C, T>
@@ -16,6 +17,7 @@ where
     C: TypeConfig,
     T: TickFactory,
 {
+    tick_factory: T,
     interval: Duration,
     tx: MpscUnboundedSenderOf<C, T::Tick>,
     enable: Arc<AtomicBool>,
@@ -26,21 +28,16 @@ where
     C: TypeConfig,
     T: TickFactory,
 {
-    pub async fn schedule(self, rx_shutdown: OneshotReceiverOf<C, ()>) {
-        let mut shutdown = std::pin::pin!(rx_shutdown);
-
+    pub async fn schedule(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), ()>{
         loop {
             let at = C::now() + self.interval;
-            let mut sleep_fut = C::sleep_until(at);
-            let mut sleep_fut = std::pin::pin!(sleep_fut);
-            let mut shutdown_fut = shutdown.as_mut();
-
+            let sleep = C::sleep_until(at);
             futures::select_biased! {
-                _ = shutdown_fut => {
+                _ = (&mut rx_shutdown).fuse() => {
                     tracing::info!("Shutting down and quit schedule.");
                     break;
                 }
-                _ = sleep_fut => {
+                _ = sleep.fuse() => {
                     // sleep done
                 }
             }
@@ -50,7 +47,7 @@ where
             }
 
             // send tick
-            let tick = T::new_tick();
+            let tick = self.tick_factory.new_tick();
             let send_res = self.tx.send(tick);
 
             if let Err(e) = send_res {
@@ -59,27 +56,27 @@ where
             }
             // send success
         }
+        Ok(())
     }
 }
 
-pub struct RepeatedTimer<C, T>
+pub struct RepeatedTimer<C>
 where
     C: TypeConfig,
-    T: TickFactory,
 {
-    shutdown: Mutex<Option<OneshotSenderOf<C, ()>>>,
-    schedule_handle: Mutex<Option<JoinHandleOf<C, T::Tick>>>,
+    shut_downing: Mutex<Option<OneshotSenderOf<C, ()>>>,
+    schedule_handle: Mutex<Option<JoinHandleOf<C, Result<(), ()>>>>,
     enable: Arc<AtomicBool>,
 }
 
-impl<C, T> RepeatedTimer<C, T>
+impl<C> RepeatedTimer<C>
 where
     C: TypeConfig,
-    T: TickFactory,
 {
-    pub fn new(interval: Duration, tx: MpscUnboundedSenderOf<C, T::Tick>, enable: bool) -> Self {
+    pub fn new<T: TickFactory>(tick_factory: T, interval: Duration, tx: MpscUnboundedSenderOf<C, T::Tick>, enable: bool) -> Self {
         let enable = Arc::new(AtomicBool::new(enable));
-        let context = Context {
+        let context: Context::<C, T> = Context::<C, T> {
+            tick_factory,
             interval,
             tx,
             enable: enable.clone(),
@@ -88,7 +85,7 @@ where
         let schedule_handle = C::spawn(context.schedule(rx_shutdown));
 
         RepeatedTimer {
-            shutdown: Mutex::new(Some(tx_shutdown)),
+            shut_downing: Mutex::new(Some(tx_shutdown)),
             schedule_handle: Mutex::new(Some(schedule_handle)),
             enable,
         }
@@ -111,9 +108,9 @@ where
 
     /// Signal the RepeatedTimer to shutdown. And return a JoinHandle to wait for the RepeatedTimer to shutdown.
     /// If it is called twice, the second call will return None.
-    pub fn shutdown(&self) -> Option<JoinHandleOf<C, ()>> {
+    pub fn shutdown(&self) -> Option<JoinHandleOf<C, Result<(), ()>>> {
         let shutdown = {
-            let mut x = self.shutdown.lock().unwrap();
+            let mut x = self.shut_downing.lock().unwrap();
             x.take()
         };
 
@@ -130,10 +127,13 @@ where
     }
 }
 
-impl<C, T> Drop for RepeatedTimer<C, T> {
+impl<C> Drop for RepeatedTimer<C>
+where
+    C: TypeConfig,
+{
     /// shutdown is called if it is not
     fn drop(&mut self) {
-        if self.shutdown.lock().unwrap().is_none() {
+        if self.shut_downing.lock().unwrap().is_none() {
             return;
         }
         let _ = self.shutdown();

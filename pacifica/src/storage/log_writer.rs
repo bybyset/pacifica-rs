@@ -1,5 +1,5 @@
 use anyerror::AnyError;
-use crate::{LogEntry, StorageError};
+use crate::{LogEntry};
 
 /// To improve the performance of writing op logs, we will write multiple op logs in batches.
 /// writer is opened first for each write, and then the op log is written in order,

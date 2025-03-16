@@ -56,7 +56,7 @@ where
 }
 
 impl<E> Error for ReceiveError<E>
-where E: Error + Send {
+where E: Error + Send + 'static {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&self.source)
     }
