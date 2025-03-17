@@ -44,8 +44,7 @@ where
     }
 
     pub(crate) async fn get_replica_group(&self) -> Result<ReplicaGroup<C>, PacificaError<C>> {
-        let replica_group = self.replica_group.read().unwrap();
-        let replica_group = replica_group.as_ref().cloned();
+        let replica_group = self.replica_group.read().unwrap().as_ref().cloned();
         if let Some(replica_group) = replica_group {
             Ok(replica_group)
         } else {
@@ -301,7 +300,7 @@ where
 {
     type LoopHandler = WorkHandler<C>;
 
-    fn new_loop_handler(&mut self) -> Option<Self::LoopHandler> {
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler> {
         self.work_handler.lock().unwrap().take()
     }
 }
