@@ -228,14 +228,14 @@ where
         Ok(log_entry)
     }
 
-    pub(crate) async fn append_log_entries(&self, log_entries: Vec<LogEntry>) -> Result<(), LogManagerError<C>> {
+    pub(crate) async fn append_log_entries(&self, log_entries: Vec<LogEntry>) -> Result<(), LogManagerError> {
         let (callback, rx) = C::oneshot();
         self.tx_task.send(Task::AppendLogEntries { log_entries, callback })?;
         rx.await?;
         Ok(())
     }
 
-    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), LifeCycleError<C>> {
+    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), LifeCycleError> {
         self.tx_task.send(Task::TruncateSuffix { last_log_index_kept })?;
         Ok(())
     }

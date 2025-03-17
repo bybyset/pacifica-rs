@@ -72,7 +72,7 @@ where
 }
 
 /// PacificaError is returned by API methods of `Replica`.
-#[derive(Error)]
+#[derive(Debug, Error)]
 pub enum PacificaError<C>
 where
     C: TypeConfig,
@@ -107,6 +107,8 @@ where
     NotFoundReplicator,
     #[error("Api timeout")]
     ApiTimeout,
+    #[error("Repetition request")]
+    RepetitionRequest,
     #[error("Receiver error")]
     ReceiverError(#[from]ReceiveError<OneshotReceiverErrorOf<C>>)
 }

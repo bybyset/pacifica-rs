@@ -8,7 +8,7 @@ use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::send_result;
 use crate::{ReplicaGroup, ReplicaId, ReplicaState, TypeConfig};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub(crate) struct ReplicaGroupAgent<C>
 where
@@ -16,7 +16,7 @@ where
 {
     current_id: ReplicaId<C::NodeId>,
     replica_group: Arc<RwLock<Option<ReplicaGroup<C>>>>,
-    work_handler: Option<WorkHandler<C>>,
+    work_handler: Mutex<Option<WorkHandler<C>>>,
     tx_task: TaskSender<C, Task<C>>,
 }
 
@@ -38,7 +38,7 @@ where
         ReplicaGroupAgent {
             current_id,
             replica_group,
-            work_handler: Some(work_handler),
+            work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
         }
     }
@@ -141,11 +141,11 @@ impl<C> Lifecycle<C> for ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError> {
+    async fn startup(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }
 }
@@ -302,7 +302,7 @@ where
     type LoopHandler = WorkHandler<C>;
 
     fn new_loop_handler(&mut self) -> Option<Self::LoopHandler> {
-        self.work_handler.take()
+        self.work_handler.lock().unwrap().take()
     }
 }
 

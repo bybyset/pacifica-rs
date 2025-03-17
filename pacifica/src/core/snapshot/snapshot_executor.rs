@@ -11,7 +11,7 @@ use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotRe
 use crate::type_config::alias::{
     JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
 };
-use crate::util::{send_result, AutoClose, RepeatedTimer, TickFactory};
+use crate::util::{send_result, AutoClose, RepeatedTimer};
 use crate::{LogId, ReplicaId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
 use futures::TryStreamExt;
 use std::sync::{Arc, Mutex};

@@ -1,24 +1,25 @@
+use futures::FutureExt;
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
-use crate::core::log::LogManager;
+use crate::core::log::{LogManager, LogManagerError};
 use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::{ReplicatorGroup, ReplicatorType};
 use crate::core::snapshot::SnapshotExecutor;
+use crate::core::state::CommitOperationError;
 use crate::core::task_sender::TaskSender;
-use crate::core::{operation, replicator, CoreNotification, ResultSender};
-use crate::error::{LifeCycleError, PacificaError, ReplicaStateError};
+use crate::core::{CaughtUpError, CoreNotification, ResultSender};
+use crate::error::{Fatal, LifeCycleError, PacificaError, ReplicaStateError};
 use crate::model::LogEntryPayload;
 use crate::rpc::message::{ReplicaRecoverRequest, ReplicaRecoverResponse};
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, Oneshot, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
 use crate::type_config::alias::{
-    JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf,
+    MpscUnboundedReceiverOf, OneshotReceiverOf,
 };
 use crate::util::{send_result, RepeatedTask, RepeatedTimer};
-use crate::{AsyncRuntime, LogEntry, LogId, ReplicaGroup, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
-use std::future::Future;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
+use anyerror::AnyError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -33,6 +34,7 @@ where
     replica_option: Arc<ReplicaOption>,
     replicator_group: Arc<ReplicatorGroup<C, FSM>>,
     lease_period_timer: RepeatedTimer<C>,
+
     work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
     tx_task: TaskSender<C, Task<C>>,
 }
@@ -64,17 +66,14 @@ where
             snapshot_executor.clone(),
             replica_group_agent.clone(),
             ballot_box.clone(),
-            core_notification,
+            core_notification.clone(),
             replica_option.clone(),
             replica_client,
         );
         let replicator_group = Arc::new(replicator_group);
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let lease_period_timeout = replica_option.lease_period_timeout();
-        let lease_period_checker = LeasePeriodChecker::new(
-            replicator_group.clone(),
-            TaskSender::new(tx_task.clone()),
-        );
+        let lease_period_checker = LeasePeriodChecker::new(replicator_group.clone(), TaskSender::new(tx_task.clone()));
         let lease_period_timer = RepeatedTimer::new(lease_period_checker, lease_period_timeout, false);
 
         let work_handler = WorkHandler::new(
@@ -82,6 +81,7 @@ where
             replica_group_agent.clone(),
             replicator_group.clone(),
             log_manager.clone(),
+            core_notification,
             rx_task,
         );
 
@@ -97,23 +97,18 @@ where
         }
     }
 
-    pub(crate) fn commit(&self, operation: Operation<C>) {
+    pub(crate) fn commit(&self, operation: Operation<C>) -> Result<(), CommitOperationError<C>> {
         let result = self.tx_task.tx_task.send(Task::Commit { operation });
-        match result {
-            Ok(_) => {}
-            Err(e) => {
-                let task = e.0;
-                match task {
-                    Task::Commit { operation } => match operation.callback {
-                        Some(callback) => {
-                            let _ = send_result(callback, Err(PacificaError::Shutdown));
-                        }
-                        None => {}
-                    },
-                    _ => {}
+        if let Err(e) = result {
+            let task = e.0;
+            match task {
+                Task::Commit { operation } => {
+                    return Err(CommitOperationError::new(operation, PacificaError::Shutdown))
                 }
-            }
-        }
+                _ => {}
+            };
+        };
+        Ok(())
     }
 
     pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError> {
@@ -123,16 +118,16 @@ where
     /// 协调阶段， 主副本提交一个'空'请求，从副本将于此次请求对齐
     pub(crate) async fn reconciliation(&self) -> Result<(), LifeCycleError> {
         let operation = Operation::new_empty();
-        self.commit(operation);
+        let result = self.commit(operation);
+        if let Err(e) = result {
+            return Err(LifeCycleError::StartupError(AnyError::new(&e)));
+        };
         Ok(())
     }
 
     pub(crate) async fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         let (callback, rx) = C::oneshot();
-        self.tx_task.send(Task::RemoveSecondary {
-            replica_id,
-            callback,
-        })?;
+        self.tx_task.send(Task::RemoveSecondary { replica_id, callback })?;
         let result: Result<(), PacificaError<C>> = rx.await?;
         result
     }
@@ -165,14 +160,26 @@ where
             //ERROR
             return Ok(ReplicaRecoverResponse::higher_term(cur_term));
         }
+
+        let recover_id = request.recover_id;
         // 添加 Replicator
-        self.replicator_group.add_replicator(request.recover_id, ReplicatorType::Candidate, true).await?;
+        self.replicator_group.add_replicator(recover_id.clone(), ReplicatorType::Candidate, true).await?;
 
         // 等待 caught up
         let timeout = self.replica_option.recover_timeout();
-        let caught_up_result = self.replicator_group.wait_caught_up(request.recover_id, timeout).await;
-
-        Ok(ReplicaRecoverResponse::success())
+        let caught_up_result = self.replicator_group.wait_caught_up(recover_id, timeout).await;
+        if let Err(e) = caught_up_result {
+            match e {
+                CaughtUpError::PacificaError(e) => {
+                    Err(e)
+                }
+                CaughtUpError::Timeout => {
+                    Err(PacificaError::ApiTimeout)
+                }
+            }
+        } else {
+            Ok(ReplicaRecoverResponse::success())
+        }
     }
 }
 
@@ -180,7 +187,9 @@ pub(crate) enum Task<C>
 where
     C: TypeConfig,
 {
-    Commit { operation: Operation<C> },
+    Commit {
+        operation: Operation<C>,
+    },
     RemoveSecondary {
         replica_id: ReplicaId<C::NodeId>,
         callback: ResultSender<C, (), PacificaError<C>>,
@@ -205,9 +214,9 @@ where
         replicator_group: Arc<ReplicatorGroup<C, FSM>>,
         tx_task: TaskSender<C, Task<C>>,
     ) -> LeasePeriodChecker<C, FSM> {
-        LeasePeriodChecker{
+        LeasePeriodChecker {
             replicator_group,
-            tx_task
+            tx_task,
         }
     }
 
@@ -218,10 +227,7 @@ where
                 if !self.replicator_group.is_alive(replica_id) {
                     let replica_id = ReplicaId::<C::NodeId>::new(replica_id.group_name(), replica_id.node_id());
                     let (callback, rx) = C::oneshot();
-                    let result = self.tx_task.send(Task::RemoveSecondary {
-                        replica_id,
-                        callback,
-                    });
+                    let result = self.tx_task.send(Task::RemoveSecondary { replica_id, callback });
                     if let Ok(_) = result {
                         let _ = rx.await;
                     }
@@ -246,11 +252,11 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-
     ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replicator_group: Arc<ReplicatorGroup<C, FSM>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+    core_notification: Arc<CoreNotification<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
@@ -259,19 +265,20 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-
     fn new(
         ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         replicator_group: Arc<ReplicatorGroup<C, FSM>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+        core_notification: Arc<CoreNotification<C>>,
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
-    ) -> WorkHandler<C,FSM> {
-        WorkHandler{
+    ) -> WorkHandler<C, FSM> {
+        WorkHandler {
             ballot_box,
             replica_group_agent,
             replicator_group,
             log_manager,
+            core_notification,
             rx_task,
         }
     }
@@ -280,39 +287,36 @@ where
             Task::Commit { operation } => {
                 self.handle_commit_task(operation).await?;
             }
-            Task::RemoveSecondary {
-                replica_id,
-                callback
-            } => {
+            Task::RemoveSecondary { replica_id, callback } => {
                 let result = self.handle_remove_secondary(replica_id).await;
-                let _ = send_result(callback, result);
+                let _ = send_result::<C, (), PacificaError<C>>(callback, result);
             }
         }
         Ok(())
     }
 
-    async fn handle_commit_task(&mut self, operation: Operation<C>) -> Result<(), LifeCycleError> {
+    async fn handle_commit_task(&mut self, mut operation: Operation<C>) -> Result<(), LifeCycleError> {
         //init and append ballot box for the operation
         let replica_group = self.replica_group_agent.get_replica_group().await;
         if let Err(e) = replica_group {
             commit_error(operation, e);
             return Ok(());
         }
+        let request_bytes = operation.request_bytes.take();
+        let replica_group = replica_group.unwrap();
         let log_term = replica_group.term();
-        let log_index_result = self
-            .ballot_box
-            .initiate_ballot(replica_group, log_term, operation.request, operation.callback)
-            .await;
+
+        let log_index_result = self.ballot_box.initiate_ballot(replica_group, log_term, operation).await;
         if let Err(e) = log_index_result {
-            commit_error(operation, e);
+            commit_error(e.operation, e.error);
             return Ok(());
         }
-        let log_index = log_index_result;
+        let log_index = log_index_result.unwrap();
 
         // append log
         let log_entry = {
             let log_id = LogId::new(log_term, log_index);
-            if let Some(op_data) = operation.request_bytes {
+            if let Some(op_data) = request_bytes {
                 LogEntry::new(log_id, LogEntryPayload::Normal { op_data })
             } else {
                 LogEntry::with_empty(log_id)
@@ -322,6 +326,12 @@ where
         if let Err(e) = append_result {
             // send error
             // step down
+            match e {
+                LogManagerError::StorageError(e) => {
+                    let _ = self.core_notification.report_fatal(Fatal::StorageError(e));
+                }
+                _ => {}
+            };
         } else {
             // replicate log entries
             let _ = self.replicator_group.continue_replicate_log();
@@ -329,7 +339,7 @@ where
         Ok(())
     }
 
-    async fn handle_remove_secondary(&mut self, secondary_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>>{
+    async fn handle_remove_secondary(&mut self, secondary_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         tracing::info!("remove secondary {}", secondary_id.to_string());
         self.replica_group_agent.remove_secondary(secondary_id.clone()).await?;
         // cancel ballot about it
@@ -382,7 +392,7 @@ where
         // lease_period_timer
         self.lease_period_timer.turn_on();
         // reconciliation
-        self.reconciliation()?;
+        self.reconciliation().await?;
         Ok(())
     }
 
@@ -409,16 +419,6 @@ where
         self.work_handler.lock().unwrap().take()
     }
 }
-
-struct CommitOperationError<C>
-where
-    C: TypeConfig,
-{
-    operation: Operation<C>,
-    error: PacificaError<C>,
-}
-
-impl<C> CommitOperationError<C> where C: TypeConfig {}
 
 fn commit_error<C: TypeConfig>(operation: Operation<C>, error: PacificaError<C>) {
     match operation.callback {

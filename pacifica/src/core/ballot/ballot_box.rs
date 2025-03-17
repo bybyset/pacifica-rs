@@ -18,6 +18,8 @@ use std::ops::Deref;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 use std::sync::{Arc, Mutex};
+use crate::core::operation::Operation;
+use crate::core::state::CommitOperationError;
 
 pub(crate) struct BallotBox<C, FSM>
 where
@@ -62,20 +64,33 @@ where
         &self,
         replica_group: ReplicaGroup<C>,
         primary_term: usize,
-        request: Option<C::Request>,
-        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
-    ) -> Result<usize, PacificaError<C>> {
+        operation: Operation<C>,
+    ) -> Result<usize, CommitOperationError<C>> {
         let ballot = Ballot::new_by_replica_group(replica_group);
         let (callback, rx) = C::oneshot();
         let task = Task::InitiateBallot {
             ballot,
             primary_term,
-            request,
-            result_sender,
+            operation,
             init_result_sender: callback,
         };
-        self.tx_task.send(task)?;
-        rx.await
+        let result = self.tx_task.tx_task.send(task);
+        if let Err(e) = result {
+            let task = e.0;
+            match task {
+                Task::InitiateBallot {
+                    operation,
+                    .. } => {
+                    return Err(CommitOperationError::new(operation, PacificaError::Shutdown))
+                },
+                _ => {
+                    panic!("");
+                }
+            };
+        }
+        let result: Result<usize, ()> = rx.await?;
+        let index = result.unwrap();
+        Ok(index)
     }
 
     /// cancel ballot
@@ -141,7 +156,7 @@ where
         &self,
         replica_id: ReplicaId<C::NodeId>,
         last_log_index: usize,
-    ) -> Result<bool, CaughtUpError> {
+    ) -> Result<bool, CaughtUpError<C>> {
         let (tx, rx) = C::oneshot();
         self.tx_task.send(Task::CaughtUp {
             replica_id,
@@ -171,16 +186,15 @@ where
         last_log_index > self.get_last_committed_index()
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError> {
         match task {
             Task::InitiateBallot {
                 ballot,
                 primary_term,
-                request,
-                result_sender,
+                operation,
                 init_result_sender,
             } => {
-                let log_index = self.handle_initiate_ballot(ballot, primary_term, request, result_sender);
+                let log_index = self.handle_initiate_ballot(ballot, primary_term, operation.request, operation.callback);
                 let _ = send_result(init_result_sender, Ok(log_index));
             }
             Task::CommitBallot { log_index } => {
@@ -192,7 +206,7 @@ where
                 last_log_index,
                 callback,
             } => {
-                let result = self.handle_caught_up(replica_id, last_log_index);
+                let result = self.handle_caught_up(replica_id, last_log_index).await;
                 let _ = send_result(callback, result);
             }
         }
@@ -200,7 +214,7 @@ where
         Ok(())
     }
 
-    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), LifeCycleError<C>> {
+    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), LifeCycleError> {
         let last_committed_index = self.last_committed_index.load(Relaxed);
         let pending_log_index = self.pending_index.load(Relaxed);
         if end_log_index_include > last_committed_index {
@@ -273,13 +287,14 @@ where
         Ok(())
     }
 
-    fn handle_caught_up(&mut self, replica_id: ReplicaId<C::NodeId>, last_log_index: usize) -> Result<bool, CaughtUpError> {
+    async fn handle_caught_up(&mut self, replica_id: ReplicaId<C::NodeId>, last_log_index: usize) -> Result<bool, CaughtUpError<C>> {
         // check
         if self.is_caught_up(last_log_index) {
             // 1. add secondary with meta
-            if self.replica_group_agent.add_secondary(replica_id.clone()) {
-                return Err(CaughtUpError::MetaError);
-            }
+
+            self.replica_group_agent.add_secondary(replica_id.clone()).await.map_err(|e| {
+                CaughtUpError::PacificaError(e)
+            })?;
             // 2. recover ballot from last_log_index + 1.
             self.do_recover_ballot(replica_id, last_log_index + 1);
             return Ok(true);
@@ -318,11 +333,11 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
+    async fn startup(&mut self) -> Result<bool, LifeCycleError> {
         Ok(true)
     }
 
-    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
+    async fn shutdown(&mut self) -> Result<bool, LifeCycleError> {
         //
         while let Some(ballot_context) = self.ballot_queue.pop_front() {
             if let Some(result_sender) = ballot_context.result_sender {
@@ -369,9 +384,8 @@ where
     InitiateBallot {
         ballot: Ballot<C>,
         primary_term: usize,
-        request: Option<C::Request>,
-        result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
-        init_result_sender: ResultSender<C, usize, PacificaError<C>>,
+        operation: Operation<C>,
+        init_result_sender: ResultSender<C, usize, ()>,
     },
 
     CommitBallot {

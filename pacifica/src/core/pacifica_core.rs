@@ -176,7 +176,8 @@ where
 {
     #[inline]
     fn handle_commit(&self, operation: Operation<C>) {
-        self.core_state.commit_operation(operation);
+        let core_state = self.core_state.read().unwrap();
+        core_state.commit_operation(operation);
     }
 
     #[inline]

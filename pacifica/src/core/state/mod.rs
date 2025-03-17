@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
 use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
 use crate::core::lifecycle::{Component, ReplicaComponent};
@@ -61,7 +63,7 @@ where
         core_notification: Arc<CoreNotification<C>>,
         replica_client: Arc<C::ReplicaClient>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self<C, FSM> {
+    ) -> Self <C, FSM> {
         let next_log_index = log_manager.get_last_log_index() + 1;
         let primary_state = PrimaryState::new(
             next_log_index,
@@ -85,7 +87,7 @@ where
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self<C, FSM> {
+    ) -> Self <C, FSM> {
         let state = SecondaryState::new(
             fsm_caller,
             log_manager,
@@ -105,7 +107,7 @@ where
         replica_client: Arc<C::ReplicaClient>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self<C, FSM> {
+    ) -> Self <C, FSM> {
         let state = CandidateState::new(
             replica_client,
             log_manager,
@@ -124,7 +126,7 @@ where
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self<C, FSM> {
+    ) -> Self <C, FSM> {
         let state = StatelessState::new(replica_group_agent, core_notification, replica_option);
         CoreState::Stateless {
             state: ReplicaComponent::new(state),
@@ -163,21 +165,17 @@ where
         state
     }
 
-    pub(crate) fn commit_operation(&self, operation: Operation<C>) {
+    pub(crate) fn commit_operation(&self, operation: Operation<C>) -> Result<(), CommitOperationError<C>> {
         match self {
             CoreState::Primary { state: primary } => {
-                primary.commit(operation);
+                primary.commit(operation)?;
+                Ok(())
             }
             _ => {
                 let error = PacificaError::ReplicaStateError(ReplicaStateError::primary_but_not(
                     self.get_replica_state()
                 ));
-                match operation.callback {
-                    Some(callback) => {
-                        let _ = send_result(callback, Err(error));
-                    }
-                    None => {}
-                }
+                Err(CommitOperationError::new(operation, error))
             }
         }
     }
@@ -196,7 +194,6 @@ where
                 Err(error)
             }
         }
-
     }
 
     pub(crate) async fn transfer_primary(&self, new_primary: ReplicaId<C::NodeId>, timeout: Duration) -> Result<(), PacificaError<C>> {
@@ -289,4 +286,49 @@ where
             CoreState::Shutdown => Ok(()),
         }
     }
+}
+
+
+pub(crate) struct CommitOperationError<C>
+where
+    C: TypeConfig,
+{
+    operation: Operation<C>,
+    error: PacificaError<C>,
+}
+
+impl<C> CommitOperationError<C>
+where
+    C: TypeConfig,
+{
+    pub(crate) fn new(operation: Operation<C>,
+                      error: PacificaError<C>, ) -> CommitOperationError<C> {
+        CommitOperationError {
+            operation,
+            error,
+        }
+    }
+}
+
+impl<C> Debug for CommitOperationError<C>
+where
+    C: TypeConfig,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "An Error=({}) occurred while commit operation({})", self.error, self.operation)
+    }
+}
+
+impl<C> Display for CommitOperationError<C>
+where
+    C: TypeConfig,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl<C> Error for CommitOperationError<C>
+where C: TypeConfig{
+
 }

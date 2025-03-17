@@ -1,25 +1,21 @@
-mod replica;
-mod declare_pacifica_types;
 mod codec;
+mod declare_pacifica_types;
+mod replica;
 mod router;
 
 pub use self::replica::Replica;
 pub use self::replica::ReplicaBuilder;
-
+use std::fmt::Debug;
 
 pub use self::declare_pacifica_types::*;
 
+pub trait Request: Debug + Send + Sync + Sized {}
 
-
-pub trait Request: Send + Sized {}
-
-pub trait Response: Send + Sized  {}
-
-
+pub trait Response: Debug + Send + Sync + Sized {}
 
 pub use self::codec::Codec;
-pub use self::codec::EncodeError;
 pub use self::codec::DecodeError;
+pub use self::codec::EncodeError;
 
-pub use self::router::ReplicaRouter;
 pub use self::router::ReplicaManager;
+pub use self::router::ReplicaRouter;

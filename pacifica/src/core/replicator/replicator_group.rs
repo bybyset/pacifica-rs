@@ -125,15 +125,14 @@ where
         &self,
         replica_id: ReplicaId<C::NodeId>,
         timeout: Duration,
-    ) -> Result<(), CaughtUpError> {
-        //
+    ) -> Result<(), CaughtUpError<C>> {
         // remove waiting
-        let result: Result<Result<(), CaughtUpError>, TimeoutErrorOf<C>>  = C::timeout(timeout, self.do_wait_caught_up(replica_id)).await;
-        let result = result.unwrap_or_else(|_timeout| Err(CaughtUpError::Timeout));
+        let result: Result<Result<(), CaughtUpError<C>>, TimeoutErrorOf<C>>  = C::timeout(timeout, self.do_wait_caught_up(replica_id)).await;
+        let result = result.unwrap_or_else(|_timeout| Err(CaughtUpError::<C>::Timeout));
         result
     }
 
-    pub(crate) fn continue_replicate_log(&self) -> Result<(), LifeCycleError<C>>{
+    pub(crate) fn continue_replicate_log(&self) -> Result<(), LifeCycleError>{
         for replicator in self.replicators.values() {
             replicator.notify_more_log()?;
         }
@@ -171,19 +170,19 @@ where
         }
     }
 
-    async fn do_wait_caught_up(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), CaughtUpError> {
+    async fn do_wait_caught_up(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), CaughtUpError<C>> {
         let replicator = self.replicators.get(&replica_id);
         match replicator {
             Some(replicator) => {
                 let (tx, callback) = C::oneshot();
                 let listener = CaughtUpListener::new(tx, 10);
                 if !replicator.add_listener(listener) {
-                    return Err(CaughtUpError::Repetition);
+                    return Err(CaughtUpError::PacificaError(PacificaError::RepetitionRequest));
                 }
-                callback.await?;
-                Ok(())
+                let result: Result<(), CaughtUpError<C>> = callback.await?;
+                result
             }
-            None => Err(CaughtUpError::NoReplicator),
+            None => Err(CaughtUpError::PacificaError(PacificaError::NotFoundReplicator)),
         }
     }
 
