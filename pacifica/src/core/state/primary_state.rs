@@ -111,7 +111,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError> {
+    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), PacificaError<C>> {
         self.ballot_box.announce_result(commit_result)
     }
 
