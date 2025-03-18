@@ -1,8 +1,7 @@
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use crate::core::ballot::BallotBox;
 use crate::core::fsm::{CommitResult, StateMachineCaller};
-use crate::core::lifecycle::{Component, ReplicaComponent};
+use crate::core::lifecycle::{ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
@@ -13,16 +12,13 @@ use crate::core::state::stateless_state::StatelessState;
 use crate::core::{CoreNotification, Lifecycle};
 use crate::error::{LifeCycleError, PacificaError, ReplicaStateError};
 use crate::rpc::message::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    AppendEntriesRequest, AppendEntriesResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use crate::rpc::RpcServiceError;
-use crate::type_config::alias::OneshotReceiverOf;
 use crate::{ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::core::snapshot::SnapshotExecutor;
-use crate::util::send_result;
 
 mod append_entries_handler;
 mod candidate_state;
@@ -63,7 +59,7 @@ where
         core_notification: Arc<CoreNotification<C>>,
         replica_client: Arc<C::ReplicaClient>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self <C, FSM> {
+    ) -> CoreState <C, FSM> {
         let next_log_index = log_manager.get_last_log_index() + 1;
         let primary_state = PrimaryState::new(
             next_log_index,
@@ -87,7 +83,7 @@ where
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self <C, FSM> {
+    ) -> CoreState <C, FSM> {
         let state = SecondaryState::new(
             fsm_caller,
             log_manager,
@@ -107,7 +103,7 @@ where
         replica_client: Arc<C::ReplicaClient>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self <C, FSM> {
+    ) -> CoreState <C, FSM> {
         let state = CandidateState::new(
             replica_client,
             log_manager,
@@ -126,7 +122,7 @@ where
         replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         replica_option: Arc<ReplicaOption>,
-    ) -> Self <C, FSM> {
+    ) -> CoreState <C, FSM> {
         let state = StatelessState::new(replica_group_agent, core_notification, replica_option);
         CoreState::Stateless {
             state: ReplicaComponent::new(state),
@@ -267,7 +263,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError> {
+    async fn startup(&self) -> Result<(), LifeCycleError> {
         match self {
             CoreState::Primary { state: primary } => primary.startup().await,
             CoreState::Secondary { state } => state.startup().await,
@@ -277,7 +273,7 @@ where
         }
     }
 
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
         match self {
             CoreState::Primary { state: primary } => primary.shutdown().await,
             CoreState::Secondary { state } => state.shutdown().await,

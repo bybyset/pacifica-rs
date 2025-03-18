@@ -1,7 +1,6 @@
 use crate::core::operation::Operation;
 use crate::core::pacifica_core::ReplicaCore;
 use crate::core::replica_msg::ApiMsg;
-use crate::core::replica_msg::ApiMsg::CommitOperation;
 use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
 use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{
@@ -12,7 +11,7 @@ use crate::rpc::message::{
 use crate::rpc::{ReplicaService, RpcServiceError};
 use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::storage::GetFileService;
-use crate::type_config::alias::{LogStorageOf, MetaClientOf, MpscUnboundedSenderOf, NodeIdOf, ReplicaClientOf, SnapshotStorageOf};
+use crate::type_config::alias::{LogStorageOf, MetaClientOf, NodeIdOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::ReplicaId;
 use crate::ReplicaOption;
 use crate::StateMachine;
@@ -34,7 +33,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    tx_api: TaskSender<C, MpscUnboundedSenderOf<C, ApiMsg<C>>>,
+    tx_api: TaskSender<C, ApiMsg<C>>,
     replica_core: ReplicaComponent<C, ReplicaCore<C, FSM>>,
 }
 
@@ -69,10 +68,10 @@ where
             replica_client,
             replica_option,
         );
-        let mut replica_core = ReplicaComponent::new(replica_core);
+        let replica_core = ReplicaComponent::new(replica_core);
         replica_core.startup().await?;
         let replica = ReplicaInner {
-            tx_api: TaskSender::new(tx_api),
+            tx_api: TaskSender::<C, ApiMsg<C>>::new(tx_api),
             replica_core,
         };
         let replica = Replica {
@@ -91,9 +90,9 @@ where
     pub async fn commit(&self, request: C::Request) -> Result<C::Response, PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         let operation = Operation::new(request, result_sender)?;
-        self.inner.tx_api.send(CommitOperation { operation }).await?;
-        let response = rx.await?;
-        Ok(response)
+        self.inner.tx_api.send(ApiMsg::CommitOperation { operation })?;
+        let result: Result<C::Response, PacificaError<C>> = rx.await?;
+        result
     }
 
     /// Manually triggering snapshot.
@@ -107,9 +106,9 @@ where
             .send(ApiMsg::SaveSnapshot {
                 callback: result_sender,
             })
-            .await?;
-        let log_id = rx.await?;
-        Ok(log_id)
+            ?;
+        let result: Result<LogId, PacificaError<C>> = rx.await?;
+        result
     }
 
     ///
@@ -120,14 +119,14 @@ where
             .send(ApiMsg::Recovery {
                 callback: result_sender,
             })
-            .await?;
-        rx.await?;
-        Ok(())
+            ?;
+        let result: Result<(), PacificaError<C>> = rx.await?;
+        result
     }
 
     /// transfer primary to ['replica_id'] and default timeout: 120s
     pub async fn transfer_primary(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
-        self.transfer_primary_with_timeout(replica_id, Duration::from_secs(120))
+        self.transfer_primary_with_timeout(replica_id, Duration::from_secs(120)).await
     }
 
     /// transfer primary to ['replica_id'] with ['timeout']
@@ -140,9 +139,9 @@ where
                 timeout,
                 callback: result_sender,
             })
-            .await?;
-        rx.await?;
-        Ok(())
+            ?;
+        let result: Result<(), PacificaError<C>> = rx.await?;
+        result
     }
 
     pub async fn shutdown(&mut self) -> Result<(), LifeCycleError> {

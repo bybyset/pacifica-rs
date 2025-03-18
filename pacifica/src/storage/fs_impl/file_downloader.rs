@@ -8,6 +8,8 @@ use std::io::{Error, Write};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
+use std::error::Error as StdError;
+use std::fmt::{Debug, Display, Formatter};
 
 const DEF_MAX_LEN_PER_REQUEST: u64 = 4096;
 const DEF_RETRIES: usize = 3;
@@ -44,7 +46,7 @@ where
     C: TypeConfig,
     GFC: GetFileClient<C>,
 {
-    pub fn new(client: Arc<GFC>, target_id: ReplicaId<C::NodeId>, reader_id: usize, option: DownloadOption) -> Self<C> {
+    pub fn new(client: Arc<GFC>, target_id: ReplicaId<C::NodeId>, reader_id: usize, option: DownloadOption) -> FileDownloader<C, GFC> {
         FileDownloader {
             client,
             target_id,
@@ -110,12 +112,40 @@ where
     }
 }
 
+
 pub enum DownloadFileError {
     ClientError { source: RpcClientError },
 
     ResponseError { response: GetFileResponse },
 
     WriteError { source: Error },
+}
+
+impl Debug for DownloadFileError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DownloadFileError::ClientError { source } => {
+                write!(f, "ClientError: {}", source)
+            }
+            DownloadFileError::ResponseError { response } => {
+                write!(f, "ResponseError: {:?}", response)
+            }
+            DownloadFileError::WriteError { source } => {
+                write!(f, "WriteError: {}", source)
+            }
+        }
+    }
+}
+
+impl Display for DownloadFileError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl StdError for DownloadFileError {
+
+
 }
 
 fn write_response(dest_file: &mut File, response: GetFileResponse) -> Result<(bool, u64), DownloadFileError> {

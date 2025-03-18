@@ -18,7 +18,7 @@ impl GetFileRequest {
         }
     }
 }
-
+#[derive(Debug)]
 pub enum GetFileResponse {
     Success { data: Vec<u8>, eof: bool },
     NotFoundReader { reader_id: usize },
@@ -51,7 +51,7 @@ impl GetFileResponse {
     }
 }
 
-pub trait GetFileClient<C>
+pub trait GetFileClient<C>: Send + Sync + 'static
 where
     C: TypeConfig,
 {

@@ -1,3 +1,5 @@
+use crate::rpc::message::{GetFileRequest, GetFileResponse};
+use crate::rpc::RpcServiceError;
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
 use crate::storage::fs_impl::file_service::{FileReader, FileService};
 use crate::storage::get_file_rpc::GetFileClient;
@@ -10,12 +12,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Write};
-use std::ops::Deref;
+use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI16, AtomicI32, Ordering};
-use std::sync::Arc;
-use crate::rpc::message::{GetFileRequest, GetFileResponse};
-use crate::rpc::RpcServiceError;
+use std::sync::atomic::{AtomicI16, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 const SNAPSHOT_PATH_PREFIX: &str = "snapshot_";
 const WRITE_TEMP_PATH_NAME: &str = "write_temp";
@@ -35,11 +35,32 @@ where
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
+    inner: Arc<FsSnapshotStorageInner<C, T, GFC>>,
+}
+
+impl<C, T, GFC> FsSnapshotStorage<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    pub fn new<P: AsRef<Path>>(directory: P, client: GFC) -> Result<FsSnapshotStorage<C, T, GFC>, Error> {
+        let inner = Arc::new(FsSnapshotStorageInner::new(directory, client)?);
+        Ok(FsSnapshotStorage { inner })
+    }
+}
+
+struct FsSnapshotStorageInner<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
     directory: PathBuf,
     last_snapshot_log_index: usize,
-    ref_map: HashMap<usize, AtomicI16>,
+    ref_map: RwLock<HashMap<usize, AtomicI16>>,
     client: Arc<GFC>,
-    file_service: Arc<FileService<C, T, GFC>>,
+    file_service: Arc<RwLock<FileService<C, T, GFC>>>,
 }
 
 pub struct FsSnapshotReader<C, T, GFC>
@@ -50,9 +71,10 @@ where
 {
     snapshot_log_index: usize,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<T, C, GFC>>,
-    file_service: Arc<FileService<C, T, GFC>>,
-    reader_id: Option<usize>,
+    fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
+    file_service: Arc<RwLock<FileService<C, T, GFC>>>,
+    reader_id: Mutex<Option<usize>>,
+    _phantom_data: PhantomData<C>
 }
 
 pub struct FsSnapshotWriter<C, T, GFC>
@@ -63,11 +85,12 @@ where
 {
     write_path: PathBuf,
     meta_table: SnapshotMetaTable<T>,
-    fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+    fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
     flushed: bool,
+    _phantom: PhantomData<C>,
 }
 
-pub trait FileMeta: PartialEq + Clone {
+pub trait FileMeta: PartialEq + Send + Sync+ Clone + 'static {
     fn encode(&self) -> Vec<u8>;
 
     fn decode(bytes: Vec<u8>) -> Self;
@@ -151,7 +174,7 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
         Ok(meta_table)
     }
 
-    fn add_file(&mut self, filename: String, file_meta: T) -> Option<T> {
+    fn add_file(&mut self, filename: String, file_meta: Option<T>) -> Option<T> {
         let file_meta = self.file_map.insert(filename, file_meta);
         let file_meta = file_meta.and_then(|x| x);
         file_meta
@@ -207,13 +230,13 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 }
 
-impl<C, T, GFC> FsSnapshotStorage<C, T, GFC>
+impl<C, T, GFC> FsSnapshotStorageInner<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    pub fn new<P: AsRef<Path>>(directory: P, client: GFC) -> Result<FsSnapshotStorage<C, T, GFC>, Error> {
+    pub fn new<P: AsRef<Path>>(directory: P, client: GFC) -> Result<FsSnapshotStorageInner<C, T, GFC>, Error> {
         let directory = directory.as_ref().to_path_buf();
         // check exists and create dir
         if !directory.exists() {
@@ -248,12 +271,12 @@ where
         let last_snapshot_log_index = snapshot_log_index_list.iter().max();
         let last_snapshot_log_index = last_snapshot_log_index.unwrap_or(&0).clone();
         let file_service = FileService::new();
-        let mut fs_storage = FsSnapshotStorage {
+        let mut fs_storage = FsSnapshotStorageInner {
             directory,
             last_snapshot_log_index,
-            ref_map: HashMap::new(),
+            ref_map: RwLock::new(HashMap::new()),
             client: Arc::new(client),
-            file_service: Arc::new(file_service),
+            file_service: Arc::new(RwLock::new(file_service)),
         };
         // inc last_snapshot_log_index
         if last_snapshot_log_index > 0 {
@@ -294,13 +317,13 @@ where
         temp_path.as_path()
     }
 
-    fn inc_ref(&mut self, log_index: usize) {
-        let ref_count = self.ref_map.entry(log_index).or_insert_with(|| AtomicI16::new(0));
+    fn inc_ref(&self, log_index: usize) {
+        let ref_count = self.ref_map.write().unwrap().entry(log_index).or_insert_with(|| AtomicI16::new(0));
         ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn dec_ref(&mut self, log_index: usize) {
-        let ref_count = self.ref_map.get(&log_index);
+    fn dec_ref(&self, log_index: usize) {
+        let ref_count = self.ref_map.read().unwrap().get(&log_index);
         assert!(ref_count.is_some());
         match ref_count {
             Some(ref_count) => {
@@ -309,7 +332,7 @@ where
                     let snapshot_path = self.get_snapshot_path(log_index);
                     let _ = remove_dir_if_exists(snapshot_path);
                     // 2. remove ref_count
-                    let _ = self.ref_map.remove(&log_index);
+                    let _ = self.ref_map.write().unwrap().remove(&log_index);
                 }
             }
             None => {
@@ -337,7 +360,7 @@ where
 {
     pub fn new<P: AsRef<Path>>(
         write_path: P,
-        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
         for_empty: bool,
     ) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
         // 1. create directory for write
@@ -353,12 +376,13 @@ where
             meta_table,
             fs_storage,
             flushed: false,
+            _phantom: Default::default(),
         };
         Ok(writer)
     }
 
     pub fn open(
-        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
         for_empty: bool,
     ) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
         let write_temp_path = fs_storage.get_write_temp_path();
@@ -370,6 +394,10 @@ where
     }
 
     pub fn add_file_with_meta(&mut self, filename: String, file_meta: T) -> Option<T> {
+        self.meta_table.add_file(filename, Some(file_meta))
+    }
+
+    pub fn add_file_option_meta(&mut self, filename: String, file_meta: Option<T>) -> Option<T> {
         self.meta_table.add_file(filename, file_meta)
     }
 
@@ -428,7 +456,7 @@ where
     GFC: GetFileClient<C>,
 {
     pub fn new(
-        fs_storage: Arc<FsSnapshotStorage<C, T, GFC>>,
+        fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
         log_index: usize,
     ) -> Result<FsSnapshotReader<C, T, GFC>, Error> {
         //
@@ -445,7 +473,8 @@ where
             meta_table,
             fs_storage,
             file_service,
-            reader_id: None,
+            reader_id: Mutex::new(None),
+            _phantom_data: PhantomData,
         };
         Ok(reader)
     }
@@ -467,10 +496,10 @@ where
     }
 
     pub fn do_close(&mut self) {
-        let reader_id = self.reader_id.take();
+        let reader_id = self.reader_id.lock().unwrap().take();
         match reader_id {
             Some(reader_id) => {
-                self.file_service.unregister_file_reader(reader_id);
+                self.file_service.write().unwrap().unregister_file_reader(reader_id);
             }
             None => {}
         }
@@ -501,10 +530,10 @@ where
         Ok(log_id)
     }
 
-    fn generate_reader_id(&mut self) -> Result<usize, AnyError> {
-        let reader_id = self.reader_id.get_or_insert_with(|| {
+    fn generate_reader_id(&self) -> Result<usize, AnyError> {
+        let reader_id = self.reader_id.lock().unwrap().get_or_insert_with(|| {
             let file_reader = FileReader::new(Arc::new(Self));
-            let reader_id = self.file_service.register_file_reader(file_reader);
+            let reader_id = self.file_service.write().unwrap().register_file_reader(file_reader);
             reader_id
         });
         Ok(*reader_id)
@@ -553,51 +582,55 @@ where
     type Writer = FsSnapshotWriter<C, T, GFC>;
 
     async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
-        let last_snapshot_log_index = self.last_snapshot_log_index;
+        let last_snapshot_log_index = self.inner.last_snapshot_log_index;
         if last_snapshot_log_index <= 0 {
             return Ok(None);
         }
-        self.inc_ref(last_snapshot_log_index);
-        let reader = FsSnapshotReader::new(Arc::new(Self), last_snapshot_log_index);
+        self.inner.inc_ref(last_snapshot_log_index);
+        let reader = FsSnapshotReader::new(self.inner.clone(), last_snapshot_log_index);
         match reader {
-            Some(reader) => Ok(Some(reader)),
+            Ok(reader) => Ok(Some(reader)),
             Err(e) => {
-                self.dec_ref(last_snapshot_log_index);
-                Err(AnyError::from(e))
+                self.inner.dec_ref(last_snapshot_log_index);
+                Err(AnyError::from(&e))
             }
         }
     }
 
     async fn open_writer(&self) -> Result<Self::Writer, AnyError> {
-        let writ_path = self.get_write_temp_path();
-        let writer = FsSnapshotWriter::new(writ_path, Arc::new(Self), true).map_err(|e| AnyError::from(e))?;
+        let writ_path = self.inner.get_write_temp_path();
+        let writer = FsSnapshotWriter::new(writ_path, self.inner.clone(), true).map_err(|e| AnyError::from(&e))?;
         Ok(writer)
     }
 
-    async fn download_snapshot(&mut self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError> {
-        let download_temp_path = self.get_download_temp_path();
+    async fn download_snapshot(&self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError> {
+        let download_temp_path = self.inner.get_download_temp_path();
         if !download_temp_path.exists() {
-            fs::create_dir(download_temp_path).map_err(|e| AnyError::from(e))?;
+            fs::create_dir(download_temp_path).map_err(|e| AnyError::from(&e))?;
         }
         // create FileDownloader
         let option = DownloadOption::default();
-        let mut file_downloader = FileDownloader::new(self.client.clone(), target_id, reader_id, option);
+        let mut file_downloader = FileDownloader::new(self.inner.client.clone(), target_id, reader_id, option);
         // 1. download snapshot meta file
-        let meta_file_path = PathBuf::from(download_temp_path).join(META_FILE_NAME).as_path();
-        file_downloader.download_file(META_FILE_NAME, meta_file_path).await.map_err(|e| AnyError::from(e))?;
+        let meta_file_path = PathBuf::from(download_temp_path).join(META_FILE_NAME);
+        file_downloader
+            .download_file(META_FILE_NAME, meta_file_path.as_path())
+            .await
+            .map_err(|e| AnyError::from(&e))?;
         // 2. load snapshot meta table from meta_file_path
-        let remote_meta_table = SnapshotMetaTable::from_file(meta_file_path).map_err(|e| AnyError::from(e))?;
+        let remote_meta_table: SnapshotMetaTable<T> =
+            SnapshotMetaTable::from_file(meta_file_path).map_err(|e| AnyError::from(&e))?;
 
         // 3. download other snapshot file
-        let mut snapshot_writer = FsSnapshotWriter::open(Arc::new(Self), true).map_err(|e| AnyError::from(e))?;
+        let mut snapshot_writer = FsSnapshotWriter::open(self.inner.clone(), true).map_err(|e| AnyError::from(&e))?;
         let snapshot_file_names = remote_meta_table.filenames();
         for filename in snapshot_file_names.into_iter() {
             if !check_is_same(filename.as_str(), &snapshot_writer.meta_table, &remote_meta_table) {
-                let file_path = PathBuf::from(download_temp_path).join(filename.as_str()).as_path();
-                file_downloader.download_file(filename.as_str(), file_path).await.map_err(|e| AnyError::from(e))?;
+                let file_path = PathBuf::from(download_temp_path).join(filename.as_str());
+                file_downloader.download_file(filename.as_str(), file_path).await.map_err(|e| AnyError::from(&e))?;
                 let file_meta = remote_meta_table.file_meta(filename.as_str());
-                let file_meta: Option<T> = file_meta.and_then(|e| e.cloned());
-                snapshot_writer.add_file_with_meta(filename, file_meta);
+                let file_meta = file_meta.cloned();
+                snapshot_writer.add_file_option_meta(filename, file_meta);
             }
         }
         snapshot_writer.flush()?;
@@ -613,7 +646,7 @@ where
 {
     #[inline]
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        self.file_service.handle_get_file_request(request).await
+        self.inner.file_service.read().unwrap().handle_get_file_request(request).await
     }
 }
 

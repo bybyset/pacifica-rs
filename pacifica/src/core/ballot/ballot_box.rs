@@ -167,7 +167,7 @@ where
     }
 
     /// announce commit result and remove ballot queue
-    pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError<C>> {
+    pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError> {
         let announce_result = Task::AnnounceBallots { commit_result };
         self.submit_task(announce_result)?;
         Ok(())
@@ -399,6 +399,6 @@ where
     CaughtUp {
         replica_id: ReplicaId<C::NodeId>,
         last_log_index: usize,
-        callback: ResultSender<C, bool, CaughtUpError>,
+        callback: ResultSender<C, bool, CaughtUpError<C>>,
     },
 }

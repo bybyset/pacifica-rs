@@ -12,7 +12,7 @@ use crate::error::{ConnectError, LifeCycleError, PacificaError, RpcClientError};
 use crate::rpc::ConnectionClient;
 use crate::runtime::{MpscUnboundedReceiver, OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf, TimeoutErrorOf, TimeoutOf};
-use crate::util::{send_result, RepeatedTimer, TickFactory};
+use crate::util::{send_result, RepeatedTimer};
 use crate::{LogId, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
 use std::collections::HashMap;
 use std::rc::Rc;
