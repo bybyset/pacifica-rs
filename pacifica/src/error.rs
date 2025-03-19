@@ -1,5 +1,5 @@
 use crate::config_cluster::MetaError;
-use crate::pacifica::EncodeError;
+use crate::pacifica::{DecodeError, EncodeError};
 use crate::{LogId, ReplicaState, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::error::Error as StdError;
@@ -16,14 +16,16 @@ use crate::type_config::alias::{OneshotReceiverErrorOf};
 #[derive(Debug)]
 pub enum Fatal {
     StorageError(StorageError),
-    CorruptedLogEntryError(CorruptedLogEntryError)
+    CorruptedLogEntryError(CorruptedLogEntryError),
+    DecodeRequestError(DecodeError)
 }
 
 impl Display for Fatal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Fatal::StorageError(e) => write!(f, "Fatal storage error. {}", e),
-            Fatal::CorruptedLogEntryError(e) => write!(f,"Fatal corrupted log entry error. {}", e)
+            Fatal::CorruptedLogEntryError(e) => write!(f,"Fatal corrupted log entry error. {}", e),
+            Fatal::DecodeRequestError(e) => write!(f,"Fatal decode request error. {}", e)
         }
     }
 }

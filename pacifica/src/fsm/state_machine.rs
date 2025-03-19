@@ -8,27 +8,31 @@ pub trait StateMachine<C> : Send + Sync + 'static
 where
     C: TypeConfig,
 {
-    async fn on_commit<I>(&self, entries: I) -> Vec<Result<C::Response, AnyError>>
+    fn on_commit<I>(&self, entries: I) -> impl std::future::Future<Output = Vec<Result<C::Response, AnyError>>> + Send
     where
-        I: Iterator<Item = Entry<C>>,
+        I: Iterator<Item = Entry<C>> + Send,
     {
-        let mut results = Vec::with_capacity(entries.size_hint().0);
-        for entry in entries {
-            let result = self.on_commit_entry(entry).await;
-            results.push(result);
+        async move {
+            let mut results = Vec::with_capacity(entries.size_hint().0);
+            for entry in entries {
+                let result = self.on_commit_entry(entry).await;
+                results.push(result);
+            }
+            results
         }
-        results
     }
 
-    async fn on_commit_entry(&self, _entry: Entry<C>) -> Result<C::Response, AnyError> {
-        Err(AnyError::error("Not implemented"))
+    fn on_commit_entry(&self, _entry: Entry<C>) -> impl std::future::Future<Output = Result<C::Response, AnyError> > + Send {
+        async move {
+            Err(AnyError::error("Not implemented"))
+        }
     }
 
-    async fn on_load_snapshot(&self, snapshot_reader: &SnapshotReaderOf<C>) -> Result<(), AnyError>;
+    fn on_load_snapshot(&self, snapshot_reader: &SnapshotReaderOf<C>) -> impl std::future::Future<Output = Result<(), AnyError>> + Send;
 
-    async fn on_save_snapshot(&self, snapshot_writer: &mut SnapshotWriteOf<C>) -> Result<(), AnyError>;
+    fn on_save_snapshot(&self, snapshot_writer: &mut SnapshotWriteOf<C>) -> impl std::future::Future<Output = Result<(), AnyError>> + Send;
 
-    async fn on_shutdown(&self);
+    fn on_shutdown(&mut self) -> impl std::future::Future<Output = ()> + Send;
 
-    async fn on_error(&self, fatal: &Fatal);
+    fn on_error(&self, fatal: &Fatal) -> impl std::future::Future<Output = ()> + Send;
 }

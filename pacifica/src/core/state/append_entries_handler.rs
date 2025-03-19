@@ -79,7 +79,7 @@ where
             return Ok(AppendEntriesResponse::conflict_log(last_log_index));
         }
         if request.entries.is_empty() {
-            let _ = self.fsm_caller.commit_at(request.committed_index);
+            let _ = self.fsm_caller.replay_at(request.committed_index);
             return Ok(AppendEntriesResponse::success());
         }
         let result = self.do_append_log_entries(request.entries).await;

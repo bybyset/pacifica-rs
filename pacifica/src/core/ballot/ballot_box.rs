@@ -337,7 +337,7 @@ where
                     }
                 }
                 let new_last_committed_index = start_log_index + requests.len();
-                self.fsm_caller.commit_batch(start_log_index, first_primary_term, requests)?;
+                self.fsm_caller.commit_requests(start_log_index, first_primary_term, requests)?;
 
                 // set new_last_committed_index
                 self.last_committed_index.store(new_last_committed_index, Relaxed);

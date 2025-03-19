@@ -1,4 +1,4 @@
-use crate::TypeConfig;
+use crate::{LogId, TypeConfig};
 use crate::core::ResultSender;
 use crate::error::{Fatal, PacificaError};
 use crate::type_config::alias::{SnapshotReaderOf, SnapshotWriteOf};
@@ -8,7 +8,7 @@ pub(crate) enum Task<C>
 where
     C: TypeConfig,
 {
-    CommitAt {
+    ReplayAt {
         log_index: usize,
     },
 
@@ -20,12 +20,12 @@ where
 
     SnapshotLoad {
         snapshot_reader: AutoClose<SnapshotReaderOf<C>>,
-        callback: ResultSender<C, (), PacificaError<C>>,
+        callback: ResultSender<C, LogId, PacificaError<C>>,
     },
 
     SnapshotSave {
         snapshot_writer: AutoClose<SnapshotWriteOf<C>>,
-        callback: ResultSender<C, (), PacificaError<C>>,
+        callback: ResultSender<C, LogId, PacificaError<C>>,
     },
 
     ReportError {
