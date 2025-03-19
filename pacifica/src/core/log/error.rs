@@ -5,6 +5,8 @@ use crate::{StorageError, TypeConfig};
 #[derive(Debug, Error)]
 pub enum LogManagerError
 {
+    #[error("LogManger has been shutdown")]
+    Shutdown,
     /// not found LogEntry at log_index
     #[error(transparent)]
     NotFound(#[from] NotFoundLogEntry),
@@ -37,6 +39,7 @@ where
 {
     fn from(value: LogManagerError) -> Self {
         match value {
+            LogManagerError::Shutdown => PacificaError::Shutdown,
             LogManagerError::CorruptedLogEntry(e) => PacificaError::CorruptedLogEntryError(e),
             LogManagerError::NotFound(e) => PacificaError::NotFoundLogEntryError(e),
             LogManagerError::StorageError(e) => PacificaError::StorageError(e),

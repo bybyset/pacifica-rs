@@ -1,20 +1,24 @@
 use crate::core::fsm::task::Task;
 use crate::core::fsm::CommitResult;
-use crate::core::lifecycle::{Component, Lifecycle, ReplicaComponent};
+use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::task_sender::TaskSender;
 use crate::core::{CoreNotification, ResultSender};
-use crate::error::{LifeCycleError, IllegalSnapshotError, PacificaError, Fatal};
+use crate::error::{Fatal, IllegalSnapshotError, LifeCycleError, PacificaError};
 use crate::fsm::{Entry, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
 use crate::storage::{SnapshotReader, SnapshotWriter};
-use crate::type_config::alias::{JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf, SnapshotWriteOf};
+use crate::type_config::alias::{
+    JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf, SnapshotReaderOf,
+    SnapshotWriteOf,
+};
 use crate::util::{send_result, AutoClose, Checksum, Closeable};
 use crate::{LogId, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
@@ -24,7 +28,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    committed_log_index: AtomicUsize,
+    committed_log_index: Arc<AtomicUsize>,
     committed_log_id: LogId,
     fsm: FSM,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
@@ -32,8 +36,8 @@ where
 
     fatal: Option<Fatal>,
 
+    work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
     tx_task: TaskSender<C, Task<C>>,
-    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
 }
 
 impl<C, FSM> StateMachineCaller<C, FSM>
@@ -48,6 +52,8 @@ where
     ) -> Self {
         let committed_log_index = AtomicUsize::new(0);
         let (tx_task, rx_task) = C::mpsc_unbounded();
+
+
         let mut fsm_caller = StateMachineCaller {
             committed_log_index,
             committed_log_id: LogId::default(),
@@ -109,9 +115,7 @@ where
     }
 
     pub(crate) fn report_fatal(&self, fatal: Fatal) -> Result<(), PacificaError<C>> {
-        self.tx_task.send(Task::ReportError {
-            fatal
-        })?;
+        self.tx_task.send(Task::ReportError { fatal })?;
         Ok(())
     }
 
@@ -119,7 +123,7 @@ where
         &self,
         start_log_index: usize,
         commit_result: Vec<Result<C::Response, AnyError>>,
-    ) -> Result<(), LifeCycleError<C>> {
+    ) -> Result<(), LifeCycleError> {
         let commit_result = CommitResult {
             start_log_index,
             commit_result,
@@ -146,8 +150,32 @@ where
         self.committed_log_index.store(committed_log_id.index, Ordering::Relaxed);
         self.committed_log_id = committed_log_id;
     }
+}
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
+struct WorkHandler<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    committed_log_index: Arc<AtomicUsize>,
+    committed_log_id: LogId,
+    fsm: FSM,
+    log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+    core_notification: Arc<CoreNotification<C>>,
+    fatal: Option<Fatal>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+}
+
+impl<C, FSM> WorkHandler<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    fn new() -> WorkHandler<C, FSM> {
+
+    }
+
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError> {
         match task {
             Task::CommitAt { log_index } => self.handle_commit_at(log_index).await?,
             Task::CommitBatch {
@@ -194,7 +222,7 @@ where
         primary_term: usize,
         start_log_index: usize,
         requests: Vec<Option<C::Request>>,
-    ) -> Result<(), LifeCycleError<C>> {
+    ) -> Result<(), LifeCycleError> {
         // case 1: no decode request bytes. eg: From Primary.
         let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
         assert_eq!(start_log_index, committed_log_index + 1);
@@ -301,30 +329,15 @@ where
     }
 }
 
-impl<C, FSM> Lifecycle<C> for StateMachineCaller<C, FSM>
+impl<C, FSM> LoopHandler<C> for WorkHandler<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
-        Ok(true)
-    }
-
-    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
-        self.fsm.on_shutdown().await;
-        Ok(true)
-    }
-}
-
-impl<C, FSM> Component<C> for StateMachineCaller<C, FSM>
-where
-    C: TypeConfig,
-    FSM: StateMachine<C>,
-{
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
+    async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         loop {
             futures::select_biased! {
-                 _ = rx_shutdown.recv().fuse() => {
+                 _ = (&mut rx_shutdown).fuse() => {
                         tracing::info!("StateMachineCaller received shutdown signal.");
                         break;
                 }
@@ -332,7 +345,12 @@ where
                 task_msg = self.rx_task.recv().fuse() => {
                     match task_msg {
                         Some(task) => {
-                            self.handle_task(task).await
+                            let result = self.handle_task(task).await
+                            match result {
+                                Ok(log_id) => {
+
+                                }
+                            }
                         }
                         None => {
                             tracing::warn!("received unexpected task message.");
@@ -342,5 +360,33 @@ where
                 }
             }
         }
+        Ok(())
+    }
+}
+
+impl<C, FSM> Lifecycle<C> for StateMachineCaller<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn startup(&self) -> Result<(), LifeCycleError> {
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
+        self.fsm.on_shutdown().await;
+        Ok(())
+    }
+}
+
+impl<C, FSM> Component<C> for StateMachineCaller<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    type LoopHandler = WorkHandler<C, FSM>;
+
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler> {
+        todo!()
     }
 }

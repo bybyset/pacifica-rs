@@ -12,9 +12,9 @@ pub trait LogStorage: Send + Sync {
 
     type LogEntryCodec: LogEntryCodec;
 
-    async fn open_writer(&self) -> Result<Self::Writer, AnyError>;
+    fn open_writer(&self) -> impl std::future::Future<Output = Result<Self::Writer, AnyError>> + Send;
 
-    async fn open_reader(&self) -> Result<Self::Reader, AnyError>;
+    fn open_reader(&self) -> impl std::future::Future<Output = Result<Self::Reader, AnyError>> + Send;
 
 }
 

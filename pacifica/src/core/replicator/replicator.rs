@@ -17,7 +17,7 @@ use crate::type_config::alias::{
     InstantOf, JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf,
     OneshotSenderOf,
 };
-use crate::util::{send_result, Instant, RepeatedTimer, TickFactory};
+use crate::util::{send_result, Instant, RepeatedTimer};
 use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::cmp::max;

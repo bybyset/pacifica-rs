@@ -1,32 +1,35 @@
-use crate::core::lifecycle::{Component, Lifecycle};
+use futures::FutureExt;
+use crate::core::lifecycle::{Component, Lifecycle, LoopHandler};
 use crate::core::log::{LogManagerError, Task};
 use crate::core::task_sender::TaskSender;
 use crate::error::{LifeCycleError, PacificaError};
 use crate::model::NOT_FOUND_INDEX;
 use crate::model::NOT_FOUND_TERM;
 use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
-use crate::type_config::alias::{JoinErrorOf, JoinHandleOf, LogWriteOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf, OneshotSenderOf};
+use crate::type_config::alias::{
+    LogWriteOf, MpscUnboundedReceiverOf, OneshotReceiverOf
+};
 use crate::util::{send_result, Checksum};
 use crate::{LogEntry, LogId, LogStorage, ReplicaOption, StorageError, TypeConfig};
 use crate::{LogReader, LogWriter};
 use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub(crate) struct LogManager<C>
 where
     C: TypeConfig,
 {
-    log_storage: C::LogStorage,
-
-    first_log_index: AtomicUsize,
-    last_log_index: AtomicUsize,
-    last_snapshot_log_id: LogId,
+    log_storage: Arc<C::LogStorage>,
+    first_log_index: Arc<AtomicUsize>,
+    last_log_index: Arc<AtomicUsize>,
+    last_snapshot_log_id: Arc<RwLock<LogId>>,
     replica_option: Arc<ReplicaOption>,
-
+    log_manager_inner: Arc<LogManagerInner<C>>,
+    work_handler: Mutex<Option<WorkHandler<C>>>,
     tx_task: TaskSender<C, Task<C>>,
-    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+
 }
 
 impl<C> LogManager<C>
@@ -35,22 +38,297 @@ where
 {
     pub(crate) fn new(log_storage: C::LogStorage, replica_option: Arc<ReplicaOption>) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
+        let log_storage = Arc::new(log_storage);
+        let first_log_index = Arc::new(AtomicUsize::new(0));
+        let last_log_index = Arc::new(AtomicUsize::new(0));
+        let last_snapshot_log_id = Arc::new(RwLock::new(LogId::default()));
+
+        let log_manager_inner = Arc::new(LogManagerInner::new(
+            log_storage.clone(),
+            first_log_index.clone(),
+            last_log_index.clone(),
+            last_snapshot_log_id.clone(),
+            replica_option.clone(),
+        ));
+
+
+        let work_handler = WorkHandler::new(
+            log_storage.clone(),
+            first_log_index.clone(),
+            last_log_index.clone(),
+            last_snapshot_log_id.clone(),
+            replica_option.clone(),
+            log_manager_inner.clone(),
+            rx_task
+        );
+
         Self {
             log_storage,
-            first_log_index: AtomicUsize::new(0),
-            last_log_index: AtomicUsize::new(0),
-            last_snapshot_log_id: LogId::default(),
+            first_log_index,
+            last_log_index,
+            last_snapshot_log_id,
             replica_option,
+            log_manager_inner,
+            work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
+        }
+    }
+
+
+
+    pub(crate) async fn append_log_entries(&self, log_entries: Vec<LogEntry>) -> Result<(), LogManagerError> {
+        let (callback, rx) = C::oneshot();
+        self.tx_task.send(Task::AppendLogEntries { log_entries, callback }).map_err(|_| {
+            LogManagerError::Shutdown
+        })?;
+        let result: Result<(), LogManagerError> = rx.await.unwrap();
+        result
+    }
+
+    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), PacificaError<C>> {
+        self.tx_task.send(Task::TruncateSuffix { last_log_index_kept })?;
+        Ok(())
+    }
+
+    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), PacificaError<C>> {
+        self.tx_task.send(Task::TruncatePrefix { first_log_index_kept })?;
+        Ok(())
+    }
+
+    /// be called after event: snapshot load done or snapshot save done
+    /// We will crop the op log
+    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), PacificaError<C>> {
+        let (callback, rx) = C::oneshot();
+        self.tx_task.send(Task::OnSnapshot {
+            snapshot_log_id,
+            callback,
+        })?;
+        rx.await?;
+        Ok(())
+    }
+
+    ///
+    ///
+    #[inline]
+    pub(crate) async fn get_log_entry_at(&self, log_index: usize) -> Result<LogEntry, LogManagerError> {
+        self.log_manager_inner.get_log_entry_at(log_index).await
+    }
+
+    /// get term of LogId(log_index)
+    /// return NOT_FOUND_TERM if log_index is 0
+    /// return NOT_FOUND_TERM if not found LogEntry at log_index
+    #[inline]
+    pub(crate) async fn get_log_term_at(&self, log_index: usize) -> Result<usize, LogManagerError> {
+        self.log_manager_inner.get_log_term_at(log_index).await
+    }
+
+    /// get first log index
+    /// return the log index in the snapshot image If there are no logs in the LogStorage.
+    /// return NOT_FOUND_INDEX If nothing
+    #[inline]
+    pub(crate) fn get_first_log_index(&self) -> usize {
+        self.log_manager_inner.get_first_log_index()
+    }
+
+    /// get last log index
+    /// return the log index in the snapshot image If there are no logs in the LogStorage.
+    /// return NOT_FOUND_INDEX If nothing
+    #[inline]
+    pub(crate) fn get_last_log_index(&self) -> usize {
+        self.log_manager_inner.get_first_log_index()
+    }
+}
+
+impl<C> Lifecycle<C> for LogManager<C>
+where
+    C: TypeConfig,
+{
+    async fn startup(&self) -> Result<(), LifeCycleError> {
+        let log_reader = self.log_storage.open_reader().await;
+        let log_reader = log_reader.map_err(|e| LifeCycleError::StartupError(e))?;
+        // set first log index
+        let first_log_index = log_reader.get_first_log_index()
+            .await
+            .map_err(|e| LifeCycleError::StartupError(e))?;
+        if let Some(first_log_index) = first_log_index {
+            self.last_log_index.store(first_log_index, Ordering::Relaxed);
+        }
+        // set last log index
+        let last_log_index = log_reader.get_last_log_index()
+            .await.map_err(|e| LifeCycleError::StartupError(e))?;
+        if let Some(last_log_index) = last_log_index {
+            self.last_log_index.store(last_log_index, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
+
+        Ok(())
+    }
+}
+
+struct LogManagerInner<C>
+where C: TypeConfig{
+    log_storage: Arc<C::LogStorage>,
+    first_log_index: Arc<AtomicUsize>,
+    last_log_index: Arc<AtomicUsize>,
+    last_snapshot_log_id: Arc<RwLock<LogId>>,
+    replica_option: Arc<ReplicaOption>,
+
+}
+
+impl<C> LogManagerInner<C>
+where C: TypeConfig{
+
+    fn new(
+        log_storage: Arc<C::LogStorage>,
+        first_log_index: Arc<AtomicUsize>,
+        last_log_index: Arc<AtomicUsize>,
+        last_snapshot_log_id: Arc<RwLock<LogId>>,
+        replica_option: Arc<ReplicaOption>,
+    ) -> LogManagerInner<C> {
+        LogManagerInner {
+            log_storage,
+            first_log_index,
+            last_log_index,
+            last_snapshot_log_id,
+            replica_option,
+        }
+    }
+
+    ///
+    pub(crate) async fn get_log_entry_at(&self, log_index: usize) -> Result<LogEntry, LogManagerError> {
+        if log_index <= NOT_FOUND_INDEX {
+            return Err(LogManagerError::not_found(log_index));
+        }
+        if log_index < self.first_log_index.load(Ordering::Relaxed)
+            || log_index > self.last_log_index.load(Ordering::Relaxed)
+        {
+            return Err(LogManagerError::not_found(log_index));
+        }
+        let log_entry = self.get_log_entry_from_storage(log_index).await?;
+
+        let result = match log_entry {
+            Some(log_entry) => {
+                if self.replica_option.log_entry_checksum_enable && log_entry.is_corrupted() {
+                    return Err(LogManagerError::corrupted_log_entry(
+                        log_entry.check_sum.unwrap(),
+                        log_entry.checksum(),
+                    ));
+                };
+                Ok(log_entry)
+            }
+            None => Err(LogManagerError::not_found(log_index)),
+        };
+        result
+    }
+
+    /// get term of LogId(log_index)
+    /// return NOT_FOUND_TERM if log_index is 0
+    /// return NOT_FOUND_TERM if not found LogEntry at log_index
+    pub(crate) async fn get_log_term_at(&self, log_index: usize) -> Result<usize, LogManagerError> {
+        if log_index <= NOT_FOUND_INDEX {
+            return Ok(NOT_FOUND_TERM);
+        }
+        let last_snapshot_log_id = self.last_snapshot_log_id.read().unwrap().clone();
+        if log_index == last_snapshot_log_id.index {
+            return Ok(last_snapshot_log_id.term);
+        }
+        if log_index < self.first_log_index.load(Ordering::Relaxed) {
+            return Ok(NOT_FOUND_TERM);
+        }
+
+        if log_index > self.last_log_index.load(Ordering::Relaxed) {
+            return Ok(NOT_FOUND_TERM);
+        }
+        // read from log storage
+        let term = self.get_log_term_from_storage(log_index).await?;
+        let result = match term {
+            Some(term) => Ok(term),
+            None => Ok(NOT_FOUND_TERM),
+        };
+        result
+    }
+
+    /// get first log index
+    /// return the log index in the snapshot image If there are no logs in the LogStorage.
+    /// return NOT_FOUND_INDEX If nothing
+    pub(crate) fn get_first_log_index(&self) -> usize {
+        let first_log_index = self.last_log_index.load(Ordering::Relaxed);
+        if first_log_index == NOT_FOUND_INDEX {
+            // snapshot log index
+            return self.last_snapshot_log_id.read().unwrap().index;
+        }
+        first_log_index
+    }
+
+    /// get last log index
+    /// return the log index in the snapshot image If there are no logs in the LogStorage.
+    /// return NOT_FOUND_INDEX If nothing
+    pub(crate) fn get_last_log_index(&self) -> usize {
+        let last_log_index = self.last_log_index.load(Ordering::Relaxed);
+        if last_log_index == NOT_FOUND_INDEX {
+            // snapshot log index
+            return self.last_snapshot_log_id.read().unwrap().index;
+        }
+        last_log_index
+    }
+
+    async fn get_log_entry_from_storage(&self, log_index: usize) -> Result<Option<LogEntry>, LogManagerError> {
+        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
+        let log_entry = log_reader.get_log_entry(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
+        Ok(log_entry)
+    }
+
+    async fn get_log_term_from_storage(&self, log_index: usize) -> Result<Option<usize>, LogManagerError> {
+        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
+        let term = log_reader.get_log_term(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
+        Ok(term)
+    }
+}
+
+struct WorkHandler<C>
+where C: TypeConfig{
+    log_storage: Arc<C::LogStorage>,
+    first_log_index: Arc<AtomicUsize>,
+    last_log_index: Arc<AtomicUsize>,
+    last_snapshot_log_id: Arc<RwLock<LogId>>,
+    replica_option: Arc<ReplicaOption>,
+    log_manager_inner: Arc<LogManagerInner<C>>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+}
+
+impl<C> WorkHandler<C>
+where C: TypeConfig {
+
+    fn new(
+        log_storage: Arc<C::LogStorage>,
+        first_log_index: Arc<AtomicUsize>,
+        last_log_index: Arc<AtomicUsize>,
+        last_snapshot_log_id: Arc<RwLock<LogId>>,
+        replica_option: Arc<ReplicaOption>,
+        log_manager_inner: Arc<LogManagerInner<C>>,
+        rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    ) -> WorkHandler<C> {
+        WorkHandler {
+            log_storage,
+            first_log_index,
+            last_log_index,
+            last_snapshot_log_id,
+            replica_option,
+            log_manager_inner,
             rx_task,
         }
     }
 
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError> {
         match task {
             Task::AppendLogEntries { log_entries, callback } => {
-                let result = self.handle_append_log_entries(log_entries).await;
-                let _ = send_result(callback, result);
+                let result = self.handle_append_log_entries(log_entries).await.map_err(|e| {
+                    LogManagerError::StorageError(e)
+                });
+                let _ = send_result::<C, (), LogManagerError>(callback, result);
             }
             Task::TruncatePrefix { first_log_index_kept } => {
                 let _ = self.handle_truncate_prefix(first_log_index_kept).await;
@@ -62,11 +340,13 @@ where
                 let _ = self.handle_reset(next_log_index).await;
             }
             Task::OnSnapshot {
-                snapshot_log_id ,
-                callback
+                snapshot_log_id,
+                callback,
             } => {
-                let result = self.handle_on_snapshot(snapshot_log_id).await;
-                let _ = send_result(callback, result);
+                let result = self.handle_on_snapshot(snapshot_log_id).await.map_err(|e| {
+                    PacificaError::<C>::from(e)
+                });
+                let _ = send_result::<C, (), PacificaError<C>>(callback, result);
             }
         }
 
@@ -121,7 +401,7 @@ where
         Ok(())
     }
 
-    async fn handle_truncate_prefix(&mut self, first_log_index_kept: usize) -> Result<(), LogManagerError<C>> {
+    async fn handle_truncate_prefix(&mut self, first_log_index_kept: usize) -> Result<(), LogManagerError> {
         if first_log_index_kept <= self.first_log_index.load(Ordering::Relaxed) {
             return Ok(());
         }
@@ -148,7 +428,7 @@ where
         Ok(())
     }
 
-    async fn handle_truncate_suffix(&mut self, last_log_index_kept: usize) -> Result<(), LogManagerError<C>> {
+    async fn handle_truncate_suffix(&mut self, last_log_index_kept: usize) -> Result<(), LogManagerError> {
         if last_log_index_kept >= self.last_log_index.load(Ordering::Relaxed) {
             return Ok(());
         }
@@ -175,7 +455,7 @@ where
         Ok(())
     }
 
-    async fn handle_reset(&mut self, next_log_index: usize) -> Result<(), LogManagerError<C>> {
+    async fn handle_reset(&mut self, next_log_index: usize) -> Result<(), LogManagerError> {
         let log_writer = self.log_storage.open_writer().await;
         let mut log_writer = log_writer.map_err(|e| StorageError::open_writer(e))?;
         let _ = log_writer.reset(next_log_index).await.map_err(|e| StorageError::reset(next_log_index, e))?;
@@ -184,13 +464,14 @@ where
         Ok(())
     }
 
-    async fn handle_on_snapshot(&mut self, snapshot_log_id: LogId) -> Result<(), LogManagerError<C>> {
-        if snapshot_log_id < self.last_snapshot_log_id {
+    async fn handle_on_snapshot(&mut self, snapshot_log_id: LogId) -> Result<(), LogManagerError> {
+        if snapshot_log_id < self.last_snapshot_log_id.read().unwrap().clone() {
             return Ok(());
         }
         loop {
+
             // case 1: normal, only truncate prefix
-            let local_term = self.get_log_term_at(snapshot_log_id.index);
+            let local_term = self.log_manager_inner.get_log_term_at(snapshot_log_id.index).await?;
             if local_term == snapshot_log_id.term {
                 // truncate prefix and reserved
                 let first_log_index_kept =
@@ -212,162 +493,21 @@ where
             self.handle_reset(snapshot_log_id.index + 1).await?;
             break;
         }
-        self.last_snapshot_log_id = snapshot_log_id;
+        let mut last_snapshot_log_id =  self.last_snapshot_log_id.write().unwrap();
+        *last_snapshot_log_id = snapshot_log_id;
         Ok(())
     }
 
-    async fn get_log_term_from_storage(&self, log_index: usize) -> Result<Option<usize>, LogManagerError<C>> {
-        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
-        let term = log_reader.get_log_term(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
-        Ok(term)
-    }
 
-    async fn get_log_entry_from_storage(&self, log_index: usize) -> Result<Option<LogEntry>, LogManagerError<C>> {
-        let log_reader = self.log_storage.open_reader().await.map_err(|e| StorageError::open_reader(e))?;
-        let log_entry = log_reader.get_log_entry(log_index).await.map_err(|e| StorageError::reset(log_index, e))?;
-        Ok(log_entry)
-    }
 
-    pub(crate) async fn append_log_entries(&self, log_entries: Vec<LogEntry>) -> Result<(), LogManagerError> {
-        let (callback, rx) = C::oneshot();
-        self.tx_task.send(Task::AppendLogEntries { log_entries, callback })?;
-        rx.await?;
-        Ok(())
-    }
 
-    pub(crate) async fn truncate_suffix(&self, last_log_index_kept: usize) -> Result<(), LifeCycleError> {
-        self.tx_task.send(Task::TruncateSuffix { last_log_index_kept })?;
-        Ok(())
-    }
-
-    pub(crate) async fn truncate_prefix(&self, first_log_index_kept: usize) -> Result<(), LifeCycleError<C>> {
-        self.tx_task.send(Task::TruncatePrefix { first_log_index_kept })?;
-        Ok(())
-    }
-
-    /// be called after event: snapshot load done or snapshot save done
-    /// We will crop the op log
-    pub(crate) async fn on_snapshot(&self, snapshot_log_id: LogId) -> Result<(), PacificaError<C>> {
-        let (callback, rx) = C::oneshot();
-        self.tx_task.send(Task::OnSnapshot {
-            snapshot_log_id,
-            callback,
-        })?;
-        rx.await?;
-        Ok(())
-    }
-
-    ///
-    pub(crate) async fn get_log_entry_at(&self, log_index: usize) -> Result<LogEntry, LogManagerError<C>> {
-        if log_index <= NOT_FOUND_INDEX {
-            return Err(LogManagerError::not_found(log_index));
-        }
-        if log_index < self.first_log_index.load(Ordering::Relaxed)
-            || log_index > self.last_log_index.load(Ordering::Relaxed)
-        {
-            return Err(LogManagerError::not_found(log_index));
-        }
-        let log_entry = self.get_log_entry_from_storage(log_index).await?;
-
-        let result = match log_entry {
-            Some(log_entry) => {
-                if self.replica_option.log_entry_checksum_enable && log_entry.is_corrupted() {
-                    return Err(
-                        LogManagerError::corrupted_log_entry(log_entry.check_sum.unwrap(), log_entry.checksum())
-                    )
-                };
-                Ok(log_entry)
-            },
-            None => Err(LogManagerError::not_found(log_index)),
-        };
-        result
-    }
-
-    /// get term of LogId(log_index)
-    /// return NOT_FOUND_TERM if log_index is 0
-    /// return NOT_FOUND_TERM if not found LogEntry at log_index
-    pub(crate) async fn get_log_term_at(&self, log_index: usize) -> Result<usize, LogManagerError> {
-        if log_index <= NOT_FOUND_INDEX {
-            return Ok(NOT_FOUND_TERM);
-        }
-        let last_snapshot_log_id = self.last_snapshot_log_id.clone();
-        if log_index == last_snapshot_log_id.index {
-            return Ok(last_snapshot_log_id.term);
-        }
-        if log_index < self.first_log_index.load(Ordering::Relaxed) {
-            return Ok(NOT_FOUND_TERM);
-        }
-
-        if log_index > self.last_log_index.load(Ordering::Relaxed) {
-            return Ok(NOT_FOUND_TERM);
-        }
-        // read from log storage
-        let term = self.get_log_term_from_storage(log_index).await?;
-        let result = match term {
-            Some(term) => Ok(term),
-            None => Ok(NOT_FOUND_TERM),
-        };
-        result
-    }
-
-    /// get first log index
-    /// return the log index in the snapshot image If there are no logs in the LogStorage.
-    /// return NOT_FOUND_INDEX If nothing
-    pub(crate) fn get_first_log_index(&self) -> usize {
-        let first_log_index = self.last_log_index.load(Ordering::Relaxed);
-        if first_log_index == NOT_FOUND_INDEX {
-            // snapshot log index
-            return self.last_snapshot_log_id.index;
-        }
-        first_log_index
-    }
-
-    /// get last log index
-    /// return the log index in the snapshot image If there are no logs in the LogStorage.
-    /// return NOT_FOUND_INDEX If nothing
-    pub(crate) fn get_last_log_index(&self) -> usize {
-        let last_log_index = self.last_log_index.load(Ordering::Relaxed);
-        if last_log_index == NOT_FOUND_INDEX {
-            // snapshot log index
-            return self.last_snapshot_log_id.index;
-        }
-        last_log_index
-    }
 }
 
-impl<C> Lifecycle<C> for LogManager<C>
-where
-    C: TypeConfig,
-{
-    async fn startup(&mut self) -> Result<bool, LifeCycleError<C>> {
-        let log_reader = self.log_storage.open_reader().await;
-        let log_reader = log_reader.map_err(|e| LifeCycleError::StartupError(e))?;
-        // set first log index
-        let first_log_index = log_reader.get_first_log_index().await.map_err(|e| LifeCycleError::StartupError(e));
-        if let Some(first_log_index) = first_log_index {
-            self.last_log_index.store(first_log_index, Ordering::Relaxed);
-        }
-        // set last log index
-        let last_log_index = log_reader.get_last_log_index().await.map_err(|e| LifeCycleError::StartupError(e));
-        if let Some(last_log_index) = last_log_index {
-            self.last_log_index.store(last_log_index, Ordering::Relaxed);
-        }
-        Ok(true)
-    }
-
-    async fn shutdown(&mut self) -> Result<bool, LifeCycleError<C>> {
-        todo!()
-    }
-}
-
-impl<C> Component<C> for LogManager<C>
-where
-    C: TypeConfig,
-{
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
+impl<C> LoopHandler<C> for WorkHandler<C> where C: TypeConfig {
+    async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) ->Result<(), LifeCycleError> {
         loop {
             futures::select_biased! {
-                _ = rx_shutdown.recv().fuse() => {
+                _ = (&mut rx_shutdown).fuse() => {
                         tracing::debug!("LogManager received shutdown signal.");
                         break;
                 }
@@ -385,5 +525,18 @@ where
                 }
             }
         }
+
+        Ok(())
+    }
+}
+
+impl<C> Component<C> for LogManager<C>
+where
+    C: TypeConfig,
+{
+    type LoopHandler = WorkHandler<C>;
+
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler> {
+        self.work_handler.lock().unwrap().take()
     }
 }
