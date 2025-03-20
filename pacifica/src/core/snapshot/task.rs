@@ -9,7 +9,7 @@ where
 {
 
     SnapshotLoad {
-        callback: ResultSender<C, (), PacificaError<C>>,
+        callback: ResultSender<C, LogId, PacificaError<C>>,
     },
 
     SnapshotSave {
@@ -20,6 +20,4 @@ where
         request: InstallSnapshotRequest<C>,
         callback: ResultSender<C, InstallSnapshotResponse, PacificaError<C>>,
     },
-
-    SnapshotTick
 }

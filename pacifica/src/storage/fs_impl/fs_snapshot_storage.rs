@@ -3,7 +3,7 @@ use crate::rpc::RpcServiceError;
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
 use crate::storage::fs_impl::file_service::{FileReader, FileService};
 use crate::storage::get_file_rpc::GetFileClient;
-use crate::storage::{GetFileService, SnapshotReader, SnapshotWriter};
+use crate::storage::{GetFileService, SnapshotDownloader, SnapshotReader, SnapshotWriter};
 use crate::util::Closeable;
 use crate::{LogId, ReplicaId, SnapshotStorage, TypeConfig};
 use anyerror::AnyError;
@@ -74,7 +74,7 @@ where
     fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
     file_service: Arc<RwLock<FileService<C, T, GFC>>>,
     reader_id: Mutex<Option<usize>>,
-    _phantom_data: PhantomData<C>
+    _phantom_data: PhantomData<C>,
 }
 
 pub struct FsSnapshotWriter<C, T, GFC>
@@ -90,7 +90,37 @@ where
     _phantom: PhantomData<C>,
 }
 
-pub trait FileMeta: PartialEq + Send + Sync+ Clone + 'static {
+pub struct FsSnapshotDownloader<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    target_id: ReplicaId<C::NodeId>,
+    reader_id: usize,
+    inner: Arc<FsSnapshotStorageInner<C, T, GFC>>,
+}
+
+impl<C, T, GFC> FsSnapshotDownloader<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    pub fn new(
+        target_id: ReplicaId<C::NodeId>,
+        reader_id: usize,
+        inner: Arc<FsSnapshotStorageInner<C, T, GFC>>,
+    ) -> Self {
+        FsSnapshotDownloader {
+            target_id,
+            reader_id,
+            inner,
+        }
+    }
+}
+
+pub trait FileMeta: PartialEq + Send + Sync + Clone + 'static {
     fn encode(&self) -> Vec<u8>;
 
     fn decode(bytes: Vec<u8>) -> Self;
@@ -571,46 +601,25 @@ where
         Ok(())
     }
 }
-
-impl<C, T, GFC> SnapshotStorage<C> for FsSnapshotStorage<C, T, GFC>
+impl<C, T, GFC> SnapshotDownloader for FsSnapshotDownloader<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    type Reader = FsSnapshotReader<C, T, GFC>;
-    type Writer = FsSnapshotWriter<C, T, GFC>;
-
-    async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
-        let last_snapshot_log_index = self.inner.last_snapshot_log_index;
-        if last_snapshot_log_index <= 0 {
-            return Ok(None);
-        }
-        self.inner.inc_ref(last_snapshot_log_index);
-        let reader = FsSnapshotReader::new(self.inner.clone(), last_snapshot_log_index);
-        match reader {
-            Ok(reader) => Ok(Some(reader)),
-            Err(e) => {
-                self.inner.dec_ref(last_snapshot_log_index);
-                Err(AnyError::from(&e))
-            }
-        }
-    }
-
-    async fn open_writer(&self) -> Result<Self::Writer, AnyError> {
-        let writ_path = self.inner.get_write_temp_path();
-        let writer = FsSnapshotWriter::new(writ_path, self.inner.clone(), true).map_err(|e| AnyError::from(&e))?;
-        Ok(writer)
-    }
-
-    async fn download_snapshot(&self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError> {
+    async fn download(&mut self) -> Result<(), AnyError> {
         let download_temp_path = self.inner.get_download_temp_path();
         if !download_temp_path.exists() {
             fs::create_dir(download_temp_path).map_err(|e| AnyError::from(&e))?;
         }
         // create FileDownloader
         let option = DownloadOption::default();
-        let mut file_downloader = FileDownloader::new(self.inner.client.clone(), target_id, reader_id, option);
+        let mut file_downloader = FileDownloader::new(
+            self.inner.client.clone(),
+            self.target_id.clone(),
+            self.reader_id,
+            option,
+        );
         // 1. download snapshot meta file
         let meta_file_path = PathBuf::from(download_temp_path).join(META_FILE_NAME);
         file_downloader
@@ -635,6 +644,47 @@ where
         }
         snapshot_writer.flush()?;
         Ok(())
+    }
+}
+
+impl<C, T, GFC> SnapshotStorage<C> for FsSnapshotStorage<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    type Reader = FsSnapshotReader<C, T, GFC>;
+    type Writer = FsSnapshotWriter<C, T, GFC>;
+    type Downloader = FsSnapshotDownloader<C, T, GFC>;
+
+    fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
+        let last_snapshot_log_index = self.inner.last_snapshot_log_index;
+        if last_snapshot_log_index <= 0 {
+            return Ok(None);
+        }
+        self.inner.inc_ref(last_snapshot_log_index);
+        let reader = FsSnapshotReader::new(self.inner.clone(), last_snapshot_log_index);
+        match reader {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) => {
+                self.inner.dec_ref(last_snapshot_log_index);
+                Err(AnyError::from(&e))
+            }
+        }
+    }
+
+    fn open_writer(&mut self) -> Result<Self::Writer, AnyError> {
+        let writ_path = self.inner.get_write_temp_path();
+        let writer = FsSnapshotWriter::new(writ_path, self.inner.clone(), true).map_err(|e| AnyError::from(&e))?;
+        Ok(writer)
+    }
+
+    fn open_downloader(
+        &mut self,
+        target_id: ReplicaId<C::NodeId>,
+        reader_id: usize,
+    ) -> Result<Self::Downloader, AnyError> {
+        Ok(FsSnapshotDownloader::new(target_id, reader_id, self.inner.clone()))
     }
 }
 

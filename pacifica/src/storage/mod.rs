@@ -35,6 +35,7 @@ pub use self::log_entry_codec::DefaultLogEntryCodec;
 pub use self::snapshot_storage::SnapshotStorage;
 pub use self::snapshot_storage::SnapshotReader;
 pub use self::snapshot_storage::SnapshotWriter;
+pub use self::snapshot_storage::SnapshotDownloader;
 pub use self::snapshot_meta::SnapshotMeta;
 
 

@@ -29,19 +29,28 @@ pub trait SnapshotWriter: Closeable + Send + Sync + 'static{
 
 }
 
+
+pub trait SnapshotDownloader: Send + Sync + 'static {
+
+    fn download(&mut self) -> impl std::future::Future<Output=Result<(), AnyError>> + Send;
+
+}
+
 pub trait SnapshotStorage<C>: GetFileService<C> + Send + Sync + 'static
 where C: TypeConfig {
     type Reader: SnapshotReader;
     type Writer: SnapshotWriter;
+    type Downloader: SnapshotDownloader;
 
     /// open snapshot reader for load snapshot image.
     /// return None if noting
     /// return AnyError if error
-    async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError>;
+    fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError>;
 
     /// open snapshot write for save snapshot image.
     /// return AnyError if error
-    async fn open_writer(&self) -> Result<Self::Writer, AnyError>;
+    fn open_writer(&mut self) -> Result<Self::Writer, AnyError>;
 
-    async fn download_snapshot(&self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<(), AnyError>;
+    /// download snapshot from remote target_id replica
+    fn open_downloader(&mut self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<Self::Downloader, AnyError>;
 }

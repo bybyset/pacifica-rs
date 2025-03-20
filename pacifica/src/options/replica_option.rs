@@ -42,7 +42,7 @@ pub struct ReplicaOption {
     /// Take snapshots periodically, in milliseconds since the last snapshot.
     /// Default 180 s
     #[clap(long, default_value = "180000")]
-    pub snapshot_timeout_ms: u64,
+    pub snapshot_interval_ms: u64,
 
     /// After the snapshot is executed, the op logs that have been merged into
     /// the snapshot image will be cleaned up. We allow a specified number of
@@ -116,6 +116,10 @@ impl ReplicaOption {
 
     pub fn recover_timeout(&self) -> Duration {
         Duration::from_millis(self.recover_request_timeout_ms)
+    }
+
+    pub fn snapshot_save_interval(&self) -> Duration {
+        Duration::from_millis(self.snapshot_interval_ms)
     }
 
 }

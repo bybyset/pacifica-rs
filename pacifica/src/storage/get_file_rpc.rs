@@ -55,12 +55,12 @@ pub trait GetFileClient<C>: Send + Sync + 'static
 where
     C: TypeConfig,
 {
-    async fn get_file(
+    fn get_file(
         &self,
         target_id: ReplicaId<C::NodeId>,
         request: GetFileRequest,
         rpc_option: RpcOption,
-    ) -> Result<GetFileResponse, RpcClientError>;
+    ) -> impl std::future::Future<Output = Result<GetFileResponse, RpcClientError>> + Send;
 }
 
 pub trait GetFileService<C>
