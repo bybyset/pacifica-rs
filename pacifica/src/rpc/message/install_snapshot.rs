@@ -26,6 +26,7 @@ where
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum InstallSnapshotResponse {
     Success,
     HigherTerm { term: usize },

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 use futures::FutureExt;
-use crate::runtime::{MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::runtime::{OneshotSender, TypeConfigExt};
 use crate::type_config::alias::{JoinHandleOf,OneshotReceiverOf, OneshotSenderOf};
 use crate::TypeConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub trait RepeatedTask: Send + 'static {
-    async fn execute(&mut self);
+    fn execute(&mut self) -> impl std::future::Future<Output = ()> + Send;
 
 }
 

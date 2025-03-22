@@ -5,7 +5,7 @@ use crate::core::task_sender::TaskSender;
 use crate::error::{LifeCycleError, PacificaError};
 use crate::model::NOT_FOUND_INDEX;
 use crate::model::NOT_FOUND_TERM;
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{
     LogWriteOf, MpscUnboundedReceiverOf, OneshotReceiverOf
 };

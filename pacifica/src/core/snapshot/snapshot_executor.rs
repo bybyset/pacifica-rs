@@ -88,7 +88,7 @@ where
     }
 
     pub(crate) async fn open_snapshot_reader(
-        &mut self,
+        &self,
     ) -> Result<Option<AutoClose<SnapshotReaderOf<C>>>, StorageError> {
         let snapshot_reader = self.snapshot_storage.write().unwrap().open_reader().map_err(|e| StorageError::open_reader(e))?;
         let snapshot_reader = snapshot_reader.map(|reader| AutoClose::new(reader));

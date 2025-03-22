@@ -30,7 +30,7 @@ where
     ) -> StatelessState<C> {
         let state_check_interval = replica_option.recover_interval();
         let (tx_task, rx_task) = C::mpsc_unbounded();
-        let state_checker = StatelessChecker::new(TaskSender::new(tx_task.clone()));
+        let state_checker: StatelessChecker<C> = StatelessChecker::new(TaskSender::new(tx_task.clone()));
         let state_check_timer = RepeatedTimer::new(state_checker, state_check_interval, false);
 
         let work_handler = WorkHandler::new(replica_group_agent, core_notification, rx_task);

@@ -53,7 +53,7 @@ where
     pub(crate) fn new(component: T) -> ReplicaComponent<C, T> {
         ReplicaComponent {
             tx_shutdown: Mutex::new(None),
-            join_handler: None,
+            join_handler: Mutex::new(None),
             component: component,
         }
     }

@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use crate::error::PacificaError;
 use crate::runtime::OneshotSender;
 use crate::type_config::alias::OneshotSenderOf;
@@ -8,7 +9,7 @@ pub(crate) struct CaughtUpListener<C>
 where
     C: TypeConfig,
 {
-    callback: Option<OneshotSenderOf<C, Result<(), CaughtUpError<C>>>>,
+    callback: Mutex<Option<OneshotSenderOf<C, Result<(), CaughtUpError<C>>>>>,
     max_margin: usize,
 }
 
@@ -18,13 +19,13 @@ where
 {
     pub(crate) fn new(callback: OneshotSenderOf<C, Result<(), CaughtUpError<C>>>, max_margin: usize) -> Self {
         CaughtUpListener {
-            callback: Some(callback),
+            callback: Mutex::new(Some(callback)),
             max_margin,
         }
     }
 
-    pub(crate) fn on_caught_up(&mut self) {
-        let callback = self.callback.take();
+    pub(crate) fn on_caught_up(&self) {
+        let callback = self.callback.lock().unwrap().take();
         match callback {
             Some(callback) => {
                 let _ = callback.send(Ok(()));
@@ -33,8 +34,8 @@ where
         }
     }
 
-    pub(crate) fn on_error(&mut self, error: CaughtUpError<C>) {
-        let callback = self.callback.take();
+    pub(crate) fn on_error(&self, error: CaughtUpError<C>) {
+        let callback = self.callback.lock().unwrap().take();
         match callback {
             Some(callback) => {
                 let _ = callback.send(Err(error));

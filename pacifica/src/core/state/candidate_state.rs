@@ -45,7 +45,7 @@ where
         let recover_interval = replica_option.recover_interval();
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let recovering = Arc::new(AtomicBool::new(false));
-        let recover_task = RecoverTask::new(recovering.clone(), TaskSender::new(tx_task.clone()));
+        let recover_task: RecoverTask<C> = RecoverTask::new(recovering.clone(), TaskSender::new(tx_task.clone()));
         let recover_timer = RepeatedTimer::new(recover_task, recover_interval, false);
         let grace_period_timeout = replica_option.grace_period_timeout();
         let grace_period = Leased::new(C::now(), grace_period_timeout.clone());

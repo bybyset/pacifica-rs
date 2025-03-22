@@ -1,29 +1,30 @@
+use futures::FutureExt;
 use crate::core::ballot::BallotBox;
 use crate::core::caught_up::CaughtUpListener;
 use crate::core::fsm::StateMachineCaller;
-use crate::core::lifecycle::Component;
+use crate::core::lifecycle::{Component, LoopHandler};
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::replica_group_agent::ReplicaGroupAgent;
 use crate::core::replicator::replicator_type::ReplicatorType;
-use crate::core::replicator::ReplicatorGroup;
 use crate::core::snapshot::SnapshotExecutor;
 use crate::core::{CoreNotification, Lifecycle, ReplicaComponent, ResultSender, TaskSender};
 use crate::error::{Fatal, HigherTermError, LifeCycleError, PacificaError};
-use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse, TransferPrimaryRequest, TransferPrimaryResponse};
+use crate::rpc::message::{
+    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
+    TransferPrimaryRequest, TransferPrimaryResponse,
+};
 use crate::rpc::{ReplicaClient, RpcClientError, RpcOption};
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::SnapshotReader;
 use crate::type_config::alias::{
-    InstantOf, JoinErrorOf, JoinHandleOf, MpscUnboundedReceiverOf, MpscUnboundedSenderOf, OneshotReceiverOf,
-    OneshotSenderOf,
+    InstantOf, MpscUnboundedReceiverOf, OneshotReceiverOf,
 };
-use crate::util::{send_result, Instant, RepeatedTimer};
-use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, StateMachine, StorageError, TypeConfig};
+use crate::util::{send_result, ByteSize, RepeatedTask, RepeatedTimer};
+use crate::{LogId, ReplicaId, ReplicaOption, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::cmp::max;
-use std::rc::Weak;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 pub(crate) struct Replicator<C, FSM>
@@ -33,25 +34,19 @@ where
 {
     primary_id: ReplicaId<C::NodeId>,
     target_id: ReplicaId<C::NodeId>,
-    replicator_type: ReplicatorType,
-    log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
-    fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
-    snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
-    replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
-    ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
-    core_notification: Arc<CoreNotification<C>>,
+    replicator_type: Arc<RwLock<ReplicatorType>>,
     options: Arc<ReplicaOption>,
-    replica_client: Arc<C::ReplicaClient>,
+    log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
 
-    waiting_more_log: bool,
+
+    waiting_more_log: Arc<AtomicBool>,
     // initial 1,
-    next_log_index: AtomicUsize,
-    last_rpc_response: InstantOf<C>,
-    caught_up_listener: Mutex<Option<CaughtUpListener<C>>>,
-
-    heartbeat_timer: RepeatedTimer<C, Task<C>>,
-    task_sender: TaskSender<C, Task<C>>,
-    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    next_log_index: Arc<AtomicUsize>,
+    last_rpc_response: Arc<RwLock<InstantOf<C>>>,
+    caught_up_listener: Arc<RwLock<Option<CaughtUpListener<C>>>>,
+    work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
+    heartbeat_timer: RepeatedTimer<C>,
+    replicator_task: Arc<ReplicatorTask<C>>,
 }
 
 impl<C, FSM> Replicator<C, FSM>
@@ -73,33 +68,153 @@ where
         replica_client: Arc<C::ReplicaClient>,
     ) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
+        let replicator_task = Arc::new(ReplicatorTask::new(
+            options.clone(),
+            TaskSender::new(tx_task.clone())
+        ));
         let heartbeat_timeout = options.heartbeat_interval();
-        let heartbeat_timer = RepeatedTimer::new(heartbeat_timeout, tx_task.clone(), false);
-
-        Replicator {
-            primary_id,
-            target_id,
-            replicator_type,
-            replica_client,
-            log_manager,
+        let heartbeat_task: HeartbeatTask<C> = HeartbeatTask::new(
+            TaskSender::new(tx_task.clone()),
+        );
+        let heartbeat_timer = RepeatedTimer::new(heartbeat_task, heartbeat_timeout, false);
+        let replicator_type = Arc::new(RwLock::new(replicator_type));
+        let waiting_more_log = Arc::new(AtomicBool::new(false));
+        let next_log_index = Arc::new(AtomicUsize::new(1));
+        let last_rpc_response =  Arc::new(RwLock::new(C::now()));
+        let caught_up_listener = Arc::new(RwLock::new(None));
+        let work_handler = WorkHandler::new(
+            primary_id.clone(),
+            target_id.clone(),
+            log_manager.clone(),
             fsm_caller,
             snapshot_executor,
             replica_group_agent,
             ballot_box,
             core_notification,
-            options,
-            waiting_more_log: false,
-            next_log_index: AtomicUsize::new(1), // initial is 1
-            last_rpc_response: C::now(),
-            caught_up_listener: Mutex::new(None),
-            heartbeat_timer,
-            task_sender: TaskSender::new(tx_task),
+            options.clone(),
+            replica_client,
+
+            replicator_type.clone(),
+            waiting_more_log.clone(),
+            // initial 1,
+            next_log_index.clone(),
+            last_rpc_response.clone(),
+            caught_up_listener.clone(),
+            replicator_task.clone(),
             rx_task,
+        );
+
+
+        Replicator {
+            primary_id,
+            target_id,
+            replicator_type,
+            log_manager,
+            options,
+            waiting_more_log,
+            next_log_index, // initial is 1
+            last_rpc_response,
+            caught_up_listener,
+            work_handler: Mutex::new(Some(work_handler)),
+            heartbeat_timer,
+            replicator_task,
         }
     }
 
     pub(crate) fn last_rpc_response(&self) -> InstantOf<C> {
-        self.last_rpc_response
+        self.last_rpc_response.read().unwrap().clone()
+    }
+
+
+
+    ///
+    pub(crate) fn get_type(&self) -> ReplicatorType {
+        self.replicator_type.read().unwrap().clone()
+    }
+
+    ///
+    pub(crate) fn get_target_id(&self) -> ReplicaId<C::NodeId> {
+        self.target_id.clone()
+    }
+
+    pub(crate) fn get_next_log_index(&self) -> usize {
+        self.next_log_index.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn add_listener(&self, listener: CaughtUpListener<C>) -> bool {
+        let mut caught_up_listener = self.caught_up_listener.write().unwrap();
+        if caught_up_listener.is_none() {
+            caught_up_listener.replace(listener);
+            return true;
+        };
+        false
+    }
+
+    pub(crate) fn remove_listener(&self) {
+        let mut caught_up_listener = self.caught_up_listener.write().unwrap();
+        let _ = caught_up_listener.take();
+    }
+
+    /// send probe request
+    ///
+    #[inline]
+    pub(crate) fn probe(&self) -> Result<(), PacificaError<C>> {
+        self.replicator_task.probe()
+    }
+    #[inline]
+    pub(crate) fn block(&self) -> Result<(), PacificaError<C>> {
+        self.replicator_task.block()
+    }
+    #[inline]
+    pub(crate) fn block_until_timeout(&self, timeout: Duration) -> Result<(), PacificaError<C>> {
+        self.replicator_task.block_until_timeout(timeout)
+    }
+
+    // send install request
+    #[inline]
+    pub(crate) fn install_snapshot(&self) -> Result<(), PacificaError<C>> {
+        self.replicator_task.install_snapshot()
+    }
+
+    // send append entries request
+    #[inline]
+    pub(crate) fn append_log_entries(&self) -> Result<(), PacificaError<C>> {
+        self.replicator_task.append_log_entries()
+    }
+
+
+    #[inline]
+    pub(crate) fn notify_more_log(&self) -> Result<(), PacificaError<C>> {
+        self.replicator_task.notify_more_log()
+    }
+
+    #[inline]
+    pub(crate) async fn transfer_primary(
+        &self,
+        last_log_index: usize,
+        timeout: Duration,
+    ) -> Result<(), PacificaError<C>> {
+        self.replicator_task.transfer_primary(last_log_index, timeout).await
+    }
+
+
+}
+
+struct ReplicatorTask<C: TypeConfig> {
+    options: Arc<ReplicaOption>,
+    task_sender: TaskSender<C, Task<C>>,
+}
+
+impl<C: TypeConfig> ReplicatorTask<C> {
+
+    fn new(
+        options: Arc<ReplicaOption>,
+        task_sender: TaskSender<C, Task<C>>,
+    ) -> ReplicatorTask<C> {
+        ReplicatorTask {
+            options,
+            task_sender,
+        }
     }
 
     /// send probe request
@@ -151,50 +266,131 @@ where
         Err(PacificaError::ApiTimeout)
     }
 
-    async fn do_transfer_primary(&self, last_log_index: usize, timeout: Duration) -> Result<(), TransferPrimaryError<C>> {
+    async fn do_transfer_primary(
+        &self,
+        last_log_index: usize,
+        timeout: Duration,
+    ) -> Result<(), TransferPrimaryError<C>> {
         let (callback, rx_result) = C::oneshot();
         self.task_sender.send(Task::TransferPrimary {
             last_log_index,
             timeout,
             callback,
+        }).map_err(|e|{
+            TransferPrimaryError::PacificaError(e)
         })?;
-        rx_result.await
+        let result: Result<(), TransferPrimaryError<C>> = rx_result.await.unwrap();
+        result
     }
 
-    ///
-    pub(crate) fn get_type(&self) -> ReplicatorType {
-        self.replicator_type
+}
+
+struct HeartbeatTask<C: TypeConfig> {
+    task_sender: TaskSender<C, Task<C>>,
+}
+impl<C> HeartbeatTask<C>
+where
+    C: TypeConfig,
+{
+    fn new(task_sender: TaskSender<C, Task<C>>) -> HeartbeatTask<C> {
+        HeartbeatTask { task_sender }
     }
 
-    ///
-    pub(crate) fn get_target_id(&self) -> ReplicaId<C::NodeId> {
-        self.target_id.clone()
+    fn send_heart_beat(&mut self) -> Result<(), PacificaError<C>> {
+        self.task_sender.send(Task::Heartbeat { timing: C::now() })?;
+        Ok(())
+    }
+}
+
+impl<C> RepeatedTask for HeartbeatTask<C>
+where
+    C: TypeConfig,
+{
+    async fn execute(&mut self) {
+        let _ = self.send_heart_beat();
+    }
+}
+
+struct WorkHandler<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    primary_id: ReplicaId<C::NodeId>,
+    target_id: ReplicaId<C::NodeId>,
+    log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+    fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+    snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
+    replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+    ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+    core_notification: Arc<CoreNotification<C>>,
+    options: Arc<ReplicaOption>,
+    replica_client: Arc<C::ReplicaClient>,
+
+    replicator_type: Arc<RwLock<ReplicatorType>>,
+    waiting_more_log: Arc<AtomicBool>,
+    // initial 1,
+    next_log_index: Arc<AtomicUsize>,
+    last_rpc_response: Arc<RwLock<InstantOf<C>>>,
+    caught_up_listener: Arc<RwLock<Option<CaughtUpListener<C>>>>,
+    replicator_task: Arc<ReplicatorTask<C>>,
+    rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+}
+
+impl<C, FSM> WorkHandler<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+
+    fn new(
+        primary_id: ReplicaId<C::NodeId>,
+        target_id: ReplicaId<C::NodeId>,
+        log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
+        fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
+        snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
+        replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
+        ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
+        core_notification: Arc<CoreNotification<C>>,
+        options: Arc<ReplicaOption>,
+        replica_client: Arc<C::ReplicaClient>,
+
+        replicator_type: Arc<RwLock<ReplicatorType>>,
+        waiting_more_log: Arc<AtomicBool>,
+        // initial 1,
+        next_log_index: Arc<AtomicUsize>,
+        last_rpc_response: Arc<RwLock<InstantOf<C>>>,
+        caught_up_listener: Arc<RwLock<Option<CaughtUpListener<C>>>>,
+        replicator_task: Arc<ReplicatorTask<C>>,
+        rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    ) -> WorkHandler<C, FSM> {
+        WorkHandler{
+            primary_id,
+            target_id,
+            log_manager,
+            fsm_caller,
+            snapshot_executor,
+            replica_group_agent,
+            ballot_box,
+            core_notification,
+            options,
+            replica_client,
+            replicator_type,
+            waiting_more_log,
+            next_log_index,
+            last_rpc_response,
+            caught_up_listener,
+            replicator_task,
+            rx_task,
+        }
     }
 
-    pub(crate) fn get_next_log_index(&self) -> usize {
-        self.next_log_index.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn add_listener(&self, listener: CaughtUpListener<C>) -> bool {
-        let mut caught_up_listener = self.caught_up_listener.lock().unwrap();
-        if caught_up_listener.is_none() {
-            caught_up_listener.replace(listener);
-            return true;
-        };
-        false
-    }
-
-    pub(crate) fn remove_listener(&self) {
-        let mut caught_up_listener = self.caught_up_listener.lock().unwrap();
-        let _ = caught_up_listener.take();
-    }
-
-    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError<C>> {
+    async fn handle_task(&mut self, task: Task<C>) -> Result<(), LifeCycleError> {
         let result = self.do_handle_task(task).await;
         match result {
             Err(e) => match e {
                 PacificaError::Fatal(fatal) => {
-                    self.core_notification.report_fatal(fatal)?;
+                    let _ = self.core_notification.report_fatal(fatal);
                     Err(LifeCycleError::Shutdown)
                 }
                 PacificaError::Shutdown => Err(LifeCycleError::Shutdown),
@@ -229,7 +425,7 @@ where
                 callback,
             } => {
                 let result = self.handle_transfer_primary(last_log_index, timeout).await;
-                let _ = send_result(callback, result);
+                let _ = send_result::<C, (), TransferPrimaryError<C>>(callback, result);
             }
         }
         Ok(())
@@ -242,15 +438,16 @@ where
     }
 
     async fn handle_probe(&mut self) -> Result<(), PacificaError<C>> {
-        self.send_empty_entries(true)?;
+        self.send_empty_entries(true).await?;
         Ok(())
     }
 
     async fn handle_heartbeat(&mut self, heartbeat_moment: InstantOf<C>) -> Result<(), PacificaError<C>> {
         let timeout = self.options.heartbeat_interval();
-        /// other request can also be considered heartbeat. reduce network overload.
-        if self.last_rpc_response + timeout < heartbeat_moment {
-            self.send_empty_entries(false)?;
+        // other request can also be considered heartbeat. reduce network overload.
+        let last_rpc_response = self.last_rpc_response.read().unwrap().clone();
+        if last_rpc_response + timeout < heartbeat_moment {
+            self.send_empty_entries(false).await?;
         }
         Ok(())
     }
@@ -266,24 +463,28 @@ where
     }
 
     async fn handle_notify_more_log(&mut self) -> Result<(), PacificaError<C>> {
-        if self.waiting_more_log {
-            self.waiting_more_log = false;
+        if self.waiting_more_log.load(Ordering::Relaxed) {
+            self.waiting_more_log.store(false, Ordering::Relaxed);
             self.send_log_entries().await?;
         }
         Ok(())
     }
 
-    async fn handle_transfer_primary(&mut self, last_log_index: usize, timeout: Duration) -> Result<(), TransferPrimaryError<C>> {
+    async fn handle_transfer_primary(
+        &mut self,
+        last_log_index: usize,
+        timeout: Duration,
+    ) -> Result<(), TransferPrimaryError<C>> {
         let cur_log_index = self.next_log_index.load(Ordering::Relaxed) - 1;
         if cur_log_index < last_log_index {
             Err(TransferPrimaryError::UnReachedError {
                 cur_log_index,
-                last_log_index
+                last_log_index,
             })
         } else {
-            self.do_send_transfer_primary_request(timeout).await.map_err(|e|{
-                TransferPrimaryError::PacificaError(e)
-            })?;
+            self.do_send_transfer_primary_request(timeout)
+                .await
+                .map_err(|e| TransferPrimaryError::PacificaError(e))?;
             Ok(())
         }
     }
@@ -295,18 +496,17 @@ where
         let request = TransferPrimaryRequest::new(self.target_id.clone(), term, version);
         let mut rpc_option = RpcOption::default();
         rpc_option.timeout = timeout;
-        let response = self.replica_client.transfer_primary(self.target_id.clone(), request, rpc_option).await.map_err(|e| {
-            PacificaError::RpcClientError(e)
-        })?;
+        let response = self
+            .replica_client
+            .transfer_primary(self.target_id.clone(), request, rpc_option)
+            .await
+            .map_err(|e| PacificaError::RpcClientError(e))?;
         match response {
-            TransferPrimaryResponse::Success => {
-                Ok(())
-            }
-            TransferPrimaryResponse::HigherTerm {term} => {
+            TransferPrimaryResponse::Success => Ok(()),
+            TransferPrimaryResponse::HigherTerm { term } => {
                 Err(PacificaError::HigherTermError(HigherTermError::new(term)))
             }
         }
-
     }
 
     /// send empty entries request, it may be triggered by a Probe or a Heartbeat.
@@ -318,13 +518,13 @@ where
         match request {
             None => {
                 // need install snapshot
-                self.install_snapshot()?;
+                self.replicator_task.install_snapshot()?;
             }
             Some(append_entries) => {
                 // send request
                 let success = self.do_send_append_entries_request(append_entries).await?;
                 if success && is_probe {
-                    self.append_log_entries()?;
+                    self.replicator_task.append_log_entries()?;
                 }
             }
         }
@@ -337,7 +537,7 @@ where
         match append_log_entries_request {
             None => {
                 // need install snapshot
-                self.install_snapshot()?;
+                self.replicator_task.install_snapshot()?;
             }
             Some(mut append_log_request) => {
                 let continue_send = self.fill_append_entries_request(&mut append_log_request).await?;
@@ -346,7 +546,7 @@ where
                 }
                 let success = self.do_send_append_entries_request(append_log_request).await?;
                 if success && continue_send {
-                    self.append_log_entries()?;
+                    self.replicator_task.append_log_entries()?;
                 }
             }
         }
@@ -365,7 +565,7 @@ where
                     .generate_reader_id()
                     .map_err(|e| Fatal::StorageError(StorageError::generate_reader_id(e)))?;
                 let replica_group =
-                    self.replica_group_agent.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+                    self.replica_group_agent.get_replica_group().await?;
                 let term = replica_group.term();
                 let version = replica_group.version();
                 let primary_id = self.primary_id.clone();
@@ -394,7 +594,7 @@ where
                 let prev_log_id = LogId::new(prev_log_term, prev_log_index);
                 let committed_index = self.fsm_caller.get_committed_log_index();
                 let replica_group =
-                    self.replica_group_agent.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+                    self.replica_group_agent.get_replica_group().await?;
                 let term = replica_group.term();
                 let version = replica_group.version();
                 let primary_id = self.primary_id.clone();
@@ -406,6 +606,9 @@ where
                 LogManagerError::NotFound(_) => Ok(None),
                 LogManagerError::CorruptedLogEntry(e) => Err(PacificaError::Fatal(Fatal::CorruptedLogEntryError(e))),
                 LogManagerError::StorageError(e) => Err(PacificaError::Fatal(Fatal::StorageError(e))),
+                LogManagerError::Shutdown => {
+                    Err(PacificaError::Shutdown)
+                }
             },
         }
     }
@@ -427,15 +630,16 @@ where
                 break;
             }
             let log_entry_result = self.log_manager.get_log_entry_at(send_log_index).await;
+
             match log_entry_result {
-                Some(log_entry) => {
+                Ok(log_entry) => {
                     let byte_size = log_entry.byte_size();
                     request.add_log_entry(log_entry);
-                    log_entries_bytes += byte_size;
+                    log_entries_bytes = log_entries_bytes + byte_size as u64;
                 }
                 Err(e) => {
                     return match e {
-                        LogManagerError::NotFound => {
+                        LogManagerError::NotFound(_) => {
                             // wait more log entry
                             Ok(false)
                         }
@@ -448,7 +652,7 @@ where
     }
 
     fn waiting_more_log(&mut self) {
-        self.waiting_more_log = true
+        self.waiting_more_log.store(true, Ordering::Relaxed);
     }
 
     async fn do_send_install_snapshot_request(
@@ -474,7 +678,7 @@ where
             entry_num: request.entries.len(),
         };
         let rpc_result = self.replica_client.append_entries(target_id, request, rpc_option).await;
-        let success = self.handle_append_log_entries_result(rpc_result, request_ctx)?;
+        let success = self.handle_append_log_entries_result(rpc_result, request_ctx).await?;
         Ok(success)
     }
 
@@ -486,7 +690,7 @@ where
         match rpc_result {
             Err(e) => {
                 tracing::error!("failed to send install_snapshot_request : {:?}", e);
-                let _ = self.block();
+                let _ = self.replicator_task.block();
             }
             Ok(response) => {
                 // handle install snapshot response
@@ -510,7 +714,7 @@ where
                     next_log_index
                 );
                 // continue append log entries
-                self.append_log_entries()?;
+                self.replicator_task.append_log_entries()?;
             }
             _ => {
                 tracing::error!("failed to receive install_snapshot_response: {:?}", response);
@@ -519,7 +723,7 @@ where
         Ok(())
     }
 
-    fn handle_append_log_entries_result(
+    async fn handle_append_log_entries_result(
         &mut self,
         rpc_result: Result<AppendEntriesResponse, RpcClientError>,
         request_ctx: AppendEntriesContext,
@@ -527,19 +731,19 @@ where
         let ret = match rpc_result {
             Err(e) => {
                 tracing::error!("failed to send append_entries_request: {:?}", e);
-                self.block()?;
+                self.replicator_task.block()?;
                 Ok(false)
             }
             Ok(append_entries_response) => {
                 // handle append entries response
-                let success = self.on_append_log_entries_response(append_entries_response, request_ctx)?;
+                let success = self.on_append_log_entries_response(append_entries_response, request_ctx).await?;
                 Ok(success)
             }
         };
         ret
     }
 
-    fn on_append_log_entries_response(
+    async fn on_append_log_entries_response(
         &mut self,
         response: AppendEntriesResponse,
         request_ctx: AppendEntriesContext,
@@ -560,20 +764,20 @@ where
                     // decrease next_log_index by one to test the right index to keep
                     self.set_next_log_index(cur_next_log_index - 1);
                 }
-                self.probe()?;
+                self.replicator_task.probe()?;
                 Ok(false)
             }
             AppendEntriesResponse::Success => {
                 self.update_last_rpc_response();
                 let start_log_index = request_ctx.prev_log_index + 1;
                 let end_log_index = request_ctx.prev_log_index + request_ctx.entry_num;
-                if end_log_index >= start_log_index && self.replicator_type.is_secondary() {
+                if end_log_index >= start_log_index && self.replicator_type.read().unwrap().is_secondary() {
                     // submit ballot
                     let replica_id = self.target_id.clone();
                     self.ballot_box.ballot_by(replica_id, start_log_index, end_log_index)?;
                 }
                 self.set_next_log_index(end_log_index + 1);
-                self.check_and_notify_caught_up(end_log_index)?;
+                self.check_and_notify_caught_up(end_log_index).await?;
                 Ok(true)
             }
         };
@@ -581,80 +785,75 @@ where
     }
 
     fn update_last_rpc_response(&mut self) {
-        self.last_rpc_response = C::now();
+        let mut last_rpc_response = self.last_rpc_response.write().unwrap();
+        *last_rpc_response = C::now();
     }
 
     /// checks if the log has caught up, and notify an event if it has.
     async fn check_and_notify_caught_up(&mut self, last_log_index: usize) -> Result<(), PacificaError<C>> {
-        let mut caught_up_listener = self.caught_up_listener.lock().unwrap().as_mut();
-        match caught_up_listener {
-            Some(caught_up_listener) => {
-                loop {
-                    // pre check
-                    if last_log_index < self.ballot_box.get_last_committed_index() {
-                        break;
-                    }
-                    if last_log_index + caught_up_listener.get_max_margin() < self.log_manager.get_last_log_index() {
-                        break;
-                    }
-                    let caught_up_result = self.ballot_box.caught_up(self.target_id.clone(), last_log_index).await;
+        if self.is_caught_up(last_log_index) {
+            let caught_up_result = self.ballot_box.caught_up(self.target_id.clone(), last_log_index).await;
+            let mut listener = self.caught_up_listener.write().unwrap();
+            let listener = listener.as_mut();
+            match listener {
+                Some(listener) => {
                     match caught_up_result {
                         Ok(caught_up) => {
                             if caught_up {
-                                caught_up_listener.on_caught_up();
-                                self.replicator_type = ReplicatorType::Secondary;
+                                listener.on_caught_up();
+                                let mut replicator_type = self.replicator_type.write().unwrap();
+                                *replicator_type = ReplicatorType::Secondary;
                                 tracing::info!("success caught up");
                             }
                         }
                         Err(e) => {
-                            caught_up_listener.on_error(e);
+                            listener.on_error(e);
                         }
                     }
-                    break;
+                }
+                None => {
+                    tracing::error!("caught up listener is None");
                 }
             }
-            None => {}
         }
         Ok(())
+    }
+
+    fn is_caught_up(&self, last_log_index: usize) -> bool {
+        let binding = self.caught_up_listener.read().unwrap();
+        let caught_up_listener = binding.as_ref();
+        if let Some(caught_up_listener) = caught_up_listener {
+            // pre check
+            if last_log_index < self.ballot_box.get_last_committed_index() {
+                false;
+            }
+            if last_log_index + caught_up_listener.get_max_margin() < self.log_manager.get_last_log_index() {
+                false;
+            }
+            true
+        } else {
+            false
+        }
     }
 
     fn set_next_log_index(&mut self, next_log_index: usize) {
         let next_log_index = max(1, next_log_index);
         self.next_log_index.store(next_log_index, Ordering::Relaxed);
     }
+
+
+
 }
 
-impl<C, FSM> Lifecycle<C> for Replicator<C, FSM>
+impl<C, FSM> LoopHandler<C> for WorkHandler<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<(), LifeCycleError<C>> {
-        // init next_log_index
-        let next_log_index = self.log_manager.get_last_log_index() + 1;
-        self.next_log_index.store(next_log_index, Ordering::Relaxed);
-        // send probe request
-        self.probe().map_err(|e| LifeCycleError::StartupError(AnyError::new(&e)))?;
-        // start heartbeat timer
-        self.heartbeat_timer.turn_on();
-        Ok(())
-    }
-
-    async fn shutdown(&mut self) -> Result<(), LifeCycleError<C>> {
-        let _ = self.heartbeat_timer.shutdown();
-        Ok(())
-    }
-}
-
-impl<C, FSM> Component<C> for Replicator<C, FSM>
-where
-    C: TypeConfig,
-    FSM: StateMachine<C>,
-{
-    async fn run_loop(&mut self, rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError<C>> {
+    async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         loop {
             futures::select_biased! {
-                 _ = rx_shutdown.recv().fuse() => {
+                 _ = (&mut rx_shutdown).fuse() => {
                         tracing::info!("Replicator received shutdown signal.");
                         break;
                 }
@@ -673,6 +872,40 @@ where
             }
         }
         Ok(())
+    }
+}
+
+impl<C, FSM> Lifecycle<C> for Replicator<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    async fn startup(&self) -> Result<(), LifeCycleError> {
+        // init next_log_index
+        let next_log_index = self.log_manager.get_last_log_index() + 1;
+        self.next_log_index.store(next_log_index, Ordering::Relaxed);
+        // send probe request
+        self.probe().map_err(|e| LifeCycleError::StartupError(AnyError::new(&e)))?;
+        // start heartbeat timer
+        self.heartbeat_timer.turn_on();
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
+        let _ = self.heartbeat_timer.shutdown();
+        Ok(())
+    }
+}
+
+impl<C, FSM> Component<C> for Replicator<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    type LoopHandler = WorkHandler<C, FSM>;
+
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler> {
+        self.work_handler.lock().unwrap().take()
     }
 }
 
@@ -703,23 +936,13 @@ where
     },
 }
 
-impl<C> TickFactory for Task<C>
-where
-    C: TypeConfig,
-{
-    type Tick = Self<C>;
-
-    fn new_tick() -> Self::Tick {
-        Self::Heartbeat { timing: C::now() }
-    }
-}
-
 struct AppendEntriesContext {
     prev_log_index: usize,
     entry_num: usize,
 }
 
-enum TransferPrimaryError<C> {
+enum TransferPrimaryError<C>
+where C: TypeConfig {
     UnReachedError {
         cur_log_index: usize,
         last_log_index: usize,

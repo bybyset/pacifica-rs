@@ -9,7 +9,7 @@ use crate::error::{Fatal, IllegalSnapshotError, LifeCycleError, PacificaError};
 use crate::fsm::{Entry, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::{SnapshotReader, SnapshotWriter};
 use crate::type_config::alias::{
     MpscUnboundedReceiverOf, OneshotReceiverOf, SnapshotReaderOf,
@@ -20,7 +20,6 @@ use crate::{LogId, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::AsyncWriteExt;
 
 pub(crate) struct StateMachineCaller<C, FSM>
 where

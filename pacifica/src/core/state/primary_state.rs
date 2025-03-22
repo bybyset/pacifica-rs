@@ -181,6 +181,8 @@ where
             Ok(ReplicaRecoverResponse::success())
         }
     }
+
+
 }
 
 pub(crate) enum Task<C>
@@ -345,7 +347,7 @@ where
         // cancel ballot about it
         let _ = self.ballot_box.cancel_ballot(secondary_id.clone());
         // remove replicator
-        let _ = self.replicator_group.remove_replicator(secondary_id);
+        let _ = self.replicator_group.remove_replicator(&secondary_id);
         Ok(())
     }
 }
@@ -387,8 +389,6 @@ where
     async fn startup(&self) -> Result<(), LifeCycleError> {
         // startup ballot box
         self.ballot_box.startup().await?;
-        // start replicator group
-        self.replicator_group.startup().await?;
         // lease_period_timer
         self.lease_period_timer.turn_on();
         // reconciliation
@@ -398,11 +398,11 @@ where
 
     async fn shutdown(&self) -> Result<(), LifeCycleError> {
         //
-        self.lease_period_timer.turn_off();
+        let _ = self.lease_period_timer.shutdown();
         // shutdown ballot box
         self.ballot_box.shutdown().await?;
         // shutdown replicator group
-        self.replicator_group.shutdown().await?;
+        self.replicator_group.clear().await;
 
         Ok(())
     }
@@ -424,7 +424,7 @@ fn commit_error<C: TypeConfig>(operation: Operation<C>, error: PacificaError<C>)
     match operation.callback {
         None => {}
         Some(callback) => {
-            let _ = send_result(callback, Err(error));
+            let _ = send_result::<C, C::Response, PacificaError<C>>(callback, Err(error));
         }
     }
 }

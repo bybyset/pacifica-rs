@@ -1,4 +1,3 @@
-use std::future::Future;
 use crate::rpc::message::AppendEntriesRequest;
 use crate::rpc::message::AppendEntriesResponse;
 use crate::rpc::message::InstallSnapshotRequest;
@@ -7,16 +6,17 @@ use crate::rpc::message::ReplicaRecoverRequest;
 use crate::rpc::message::ReplicaRecoverResponse;
 use crate::rpc::message::TransferPrimaryRequest;
 use crate::rpc::message::TransferPrimaryResponse;
+use std::future::Future;
 
-
+use crate::error::ConnectError;
 use crate::rpc::RpcClientError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
-use crate::error::ConnectError;
 
 pub trait ConnectionClient<C>
-where C: TypeConfig {
-
+where
+    C: TypeConfig,
+{
     async fn connect(&self, _replica_id: &ReplicaId<C::NodeId>) -> Result<(), ConnectError<C>> {
         Ok(())
     }
@@ -25,13 +25,17 @@ where C: TypeConfig {
         true
     }
 
-    async fn check_connected(&self, replica_id: &ReplicaId<C::NodeId>, create_if_absent: bool) -> Result<bool, ConnectError<C>> {
+    async fn check_connected(
+        &self,
+        replica_id: &ReplicaId<C::NodeId>,
+        create_if_absent: bool,
+    ) -> Result<bool, ConnectError<C>> {
         if !self.is_connected(replica_id).await {
             if create_if_absent {
                 self.connect(replica_id).await?;
-                return Ok(true)
+                return Ok(true);
             }
-            return Ok(false)
+            return Ok(false);
         }
         Ok(true)
     }
@@ -39,30 +43,25 @@ where C: TypeConfig {
     async fn is_connected(&self, _replica_id: &ReplicaId<C::NodeId>) -> bool {
         true
     }
-
-
 }
-
-
-
 
 pub trait ReplicaClient<C>: ConnectionClient<C> + Send + Sync
 where
     C: TypeConfig,
 {
-    async fn append_entries(
+    fn append_entries(
         &self,
         target: ReplicaId<C::NodeId>,
         request: AppendEntriesRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<AppendEntriesResponse, RpcClientError>;
+    ) -> impl Future<Output = Result<AppendEntriesResponse, RpcClientError>> + Send;
 
-    async fn install_snapshot(
+    fn install_snapshot(
         &self,
         target_id: ReplicaId<C::NodeId>,
         request: InstallSnapshotRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<InstallSnapshotResponse, RpcClientError>;
+    ) -> impl Future<Output = Result<InstallSnapshotResponse, RpcClientError>> + Send;
 
     fn replica_recover(
         &self,
@@ -71,11 +70,10 @@ where
         rpc_option: RpcOption,
     ) -> impl Future<Output = Result<ReplicaRecoverResponse, RpcClientError>> + Send;
 
-    async fn transfer_primary(
+    fn transfer_primary(
         &self,
         secondary_id: ReplicaId<C::NodeId>,
         request: TransferPrimaryRequest<C>,
         rpc_option: RpcOption,
-    ) -> Result<TransferPrimaryResponse, RpcClientError>;
-
+    ) -> impl Future<Output = Result<TransferPrimaryResponse, RpcClientError>> + Send;
 }

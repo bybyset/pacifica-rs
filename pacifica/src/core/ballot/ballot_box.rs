@@ -12,7 +12,7 @@ use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, 
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::send_result;
 use crate::{ReplicaGroup, ReplicaId, StateMachine, TypeConfig};
-use futures::{SinkExt, TryFutureExt};
+use futures::{SinkExt};
 use std::cmp::{max, min};
 use std::collections::vec_deque::Iter;
 use std::collections::VecDeque;
@@ -150,7 +150,8 @@ where
         assert!(start_log_index <= end_log_index);
         let start_index = start_log_index - pending_start_index;
         let end_index = end_log_index - start_log_index;
-        let ballots = self.ballot_queue.read().unwrap().range(start_index..end_index);
+        let ballots = self.ballot_queue.read().unwrap();
+        let ballots =  ballots.range(start_index..end_index);
         let log_index = grant_ballots(ballots, start_log_index, &replica_id);
         if log_index >= start_log_index {
             let task = Task::CommitBallot { log_index };
@@ -204,7 +205,7 @@ fn grant_ballots<C: TypeConfig>(
     let mut commit_end_log_index = start_log_index - 1;
     let mut last_granted = true;
     for ballot in ballots {
-        if ballot.grant(replica_id) {
+        if ballot.ballot.grant(replica_id) {
             //
             if last_granted {
                 commit_end_log_index = commit_end_log_index + 1;
@@ -289,7 +290,7 @@ where
                 let _ = send_result::<C, usize, ()>(init_result_sender, Ok(log_index));
             }
             Task::CommitBallot { log_index } => {
-                let _ = self.handle_commit_ballot(log_index).await;
+                let _ = self.handle_commit_ballot(log_index);
             }
             Task::CancelBallot { replica_id} => {
                 let _ = self.handle_cancel_ballot(replica_id);
@@ -310,7 +311,7 @@ where
         Ok(())
     }
 
-    async fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), PacificaError<C>> {
+    fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), PacificaError<C>> {
         let last_committed_index = self.last_committed_index.load(Relaxed);
         let pending_log_index = self.pending_index.load(Relaxed);
         if end_log_index_include > last_committed_index {
@@ -353,19 +354,21 @@ where
         request: Option<C::Request>,
         result_sender: Option<ResultSender<C, C::Response, PacificaError<C>>>,
     ) -> usize {
-        self.ballot_queue.push_back(BallotContext {
+        let mut ballot_queue = self.ballot_queue.write().unwrap();
+        ballot_queue.push_back(BallotContext::<C> {
             ballot,
             primary_term,
             request,
             result_sender,
         });
-        self.pending_index.load(Relaxed) + self.ballot_queue.len()
+        self.pending_index.load(Relaxed) + ballot_queue.len()
     }
 
     fn handle_cancel_ballot(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         let start_log_index = self.pending_index.load(Relaxed);
         let commit_end_log_index = {
-            let ballots = self.ballot_queue.read().unwrap().iter();
+            let ballot_queue = self.ballot_queue.read().unwrap();
+            let ballots = ballot_queue.iter();
             grant_ballots(ballots, start_log_index, &replica_id)
         };
         if commit_end_log_index >= start_log_index {
@@ -377,15 +380,16 @@ where
         //
         let start_log_index = commit_result.start_log_index;
         let pending_index = self.pending_index.load(Relaxed);
+        let mut ballot_queue = self.ballot_queue.write().unwrap();
         assert_eq!(start_log_index, pending_index);
-        assert!(commit_result.commit_result.len() <= self.ballot_queue.len());
+        assert!(commit_result.commit_result.len() <= ballot_queue.len());
         for result in commit_result.commit_result.into_iter() {
-            if let Some(ballot_context) = self.ballot_queue.pop_front() {
+            if let Some(ballot_context) = ballot_queue.pop_front() {
                 self.pending_index.fetch_add(1, Relaxed);
                 // 发送用户定义的异常
                 if let Some(result_sender) = ballot_context.result_sender {
                     let result =
-                        result.map_err(|e| PacificaError::UserFsmError(UserStateMachineError::while_commit_entry(e)));
+                        result.map_err(|e| PacificaError::<C>::UserFsmError(UserStateMachineError::while_commit_entry(e)));
                     let _ = send_result(result_sender, result);
                 }
             } else {

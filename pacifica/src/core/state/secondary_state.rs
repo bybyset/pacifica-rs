@@ -9,7 +9,7 @@ use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::{send_result, Leased, RepeatedTask, RepeatedTimer};
 use crate::{ReplicaOption, StateMachine, TypeConfig};
@@ -45,7 +45,7 @@ where
         let grace_period = Arc::new(RwLock::new(grace_period));
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let grace_tx_task = TaskSender::new(tx_task.clone());
-        let grace_period_checker = GracePeriodChecker::new(grace_period.clone(), grace_tx_task);
+        let grace_period_checker: GracePeriodChecker<C> = GracePeriodChecker::new(grace_period.clone(), grace_tx_task);
         let grace_period_timer = RepeatedTimer::new(grace_period_checker, grace_period_timeout, false);
         let append_entries_handler = AppendEntriesHandler::new(
             grace_period.clone(),
@@ -209,15 +209,15 @@ where
                 let _ = send_result::<C, AppendEntriesResponse, PacificaError<C>>(callback, result);
             }
             Task::ElectSelf { callback } => {
-                let result = self.handle_elect_self();
+                let result = self.handle_elect_self().await;
                 let _ = send_result::<C, (), PacificaError<C>>(callback, result);
             }
         }
 
         Ok(())
     }
-    fn handle_elect_self(&self) -> Result<(), PacificaError<C>> {
-        self.replica_group_agent.elect_self()?;
+    async fn handle_elect_self(&self) -> Result<(), PacificaError<C>> {
+        self.replica_group_agent.elect_self().await?;
         self.core_notification.core_state_change()?;
         Ok(())
     }
