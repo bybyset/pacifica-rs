@@ -1,7 +1,7 @@
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::RpcServiceError;
 use crate::storage::get_file_rpc::{GetFileClient, GetFileService};
-use crate::storage::fs_impl::{FileMeta, FsSnapshotReader};
+use crate::storage::fs_impl::{FileMeta};
 use crate::TypeConfig;
 use std::cmp::min;
 use std::collections::HashMap;
@@ -12,7 +12,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter};
-use crate::storage::fs_impl::fs_snapshot_storage::META_FILE_NAME;
+use crate::storage::fs_impl::fs_snapshot_storage::{FsSnapshotReaderInner, META_FILE_NAME};
+use crate::util::AutoClose;
 
 pub enum ReadFileError {
     NotFoundFile { filename: String },
@@ -63,7 +64,7 @@ where
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    fs_snapshot_reader: Arc<FsSnapshotReader<C, T, GFC>>,
+    fs_snapshot_reader: Arc<AutoClose<FsSnapshotReaderInner<C, T, GFC>>>,
 }
 
 impl<C, T, GFC> FileReader<C, T, GFC>
@@ -72,7 +73,7 @@ where
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    pub fn new(fs_snapshot_reader: Arc<FsSnapshotReader<C, T, GFC>>) -> FileReader<C, T, GFC> {
+    pub fn new(fs_snapshot_reader: Arc<AutoClose<FsSnapshotReaderInner<C, T, GFC>>>) -> FileReader<C, T, GFC> {
         FileReader { fs_snapshot_reader }
     }
 

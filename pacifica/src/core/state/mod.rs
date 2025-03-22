@@ -152,11 +152,11 @@ where
 
     pub(crate) fn get_replica_state(&self) -> ReplicaState {
         let state = match self {
-            CoreState::Primary => ReplicaState::Primary,
-            CoreState::Secondary => ReplicaState::Secondary,
-            CoreState::Candidate => ReplicaState::Candidate,
+            CoreState::Primary { state: _ } => ReplicaState::Primary,
+            CoreState::Secondary { state: _ } => ReplicaState::Secondary,
+            CoreState::Candidate { state: _ }=> ReplicaState::Candidate,
             CoreState::Shutdown => ReplicaState::Shutdown,
-            CoreState::Stateless => ReplicaState::Stateless,
+            CoreState::Stateless { state: _ }=> ReplicaState::Stateless,
         };
         state
     }
@@ -289,8 +289,8 @@ pub(crate) struct CommitOperationError<C>
 where
     C: TypeConfig,
 {
-    operation: Operation<C>,
-    error: PacificaError<C>,
+    pub operation: Operation<C>,
+    pub error: PacificaError<C>,
 }
 
 impl<C> CommitOperationError<C>

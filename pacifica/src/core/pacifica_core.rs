@@ -20,8 +20,9 @@ use crate::storage::GetFileService;
 use crate::type_config::alias::{LogStorageOf, MetaClientOf, MpscUnboundedReceiverOf, NodeIdOf, OneshotReceiverOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::util::{send_result};
 use crate::{LogId, ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+use anyerror::AnyError;
 
 pub struct ReplicaCore<C, FSM>
 where
@@ -36,11 +37,10 @@ where
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replica_client: Arc<C::ReplicaClient>,
-    meta_client: Arc<C::MetaClient>,
     replica_option: Arc<ReplicaOption>,
-    core_state: Arc<RwLock<CoreState<C, FSM>>>,
+    core_state: Arc<RwLock<Arc<CoreState<C, FSM>>>>,
 
-    work_handler: Option<WorkHandler<C, FSM>>,
+    work_handler: Mutex<Option<WorkHandler<C, FSM>>>
 }
 
 impl<C, FSM> ReplicaCore<C, FSM>
@@ -78,14 +78,13 @@ where
             replica_option.clone(),
         )));
 
-        let meta_client = Arc::new(meta_client);
         let replica_client = Arc::new(replica_client);
-
         let replica_group = Arc::new(ReplicaComponent::new(ReplicaGroupAgent::new(
             replica_id.clone(),
-            meta_client.clone(),
+            meta_client,
         )));
-        let core_state = Arc::new(RwLock::new(CoreState::Shutdown));
+        let core_state = Arc::new(CoreState::Shutdown);
+        let core_state = Arc::new(RwLock::new(core_state));
 
         let work_handler = WorkHandler {
             replica_id: replica_id.clone(),
@@ -97,7 +96,6 @@ where
             snapshot_executor: snapshot_executor.clone(),
             replica_group: replica_group.clone(),
             replica_client: replica_client.clone(),
-            meta_client: meta_client.clone(),
             replica_option: replica_option.clone(),
             core_state: core_state.clone(),
         };
@@ -110,10 +108,9 @@ where
             log_manager,
             replica_group,
             replica_client,
-            meta_client,
             replica_option,
             core_state,
-            work_handler: Some(work_handler),
+            work_handler: Mutex::new(Some(work_handler)),
         }
     }
 }
@@ -123,30 +120,29 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    async fn startup(&mut self) -> Result<bool, LifeCycleError> {
+    async fn startup(&self) -> Result<(), LifeCycleError> {
         // startup log_manager
-        ReplicaComponent::startup(&mut *self.log_manager).await?;
-        ReplicaComponent::startup(&mut *self.fsm_caller).await?;
-        ReplicaComponent::startup(&mut *self.snapshot_executor).await?;
-        // self.log_manager.startup().await?;
-        // // startup fsm_caller
-        // self.fsm_caller.startup().await?;
-        // // startup snapshot_executor
-        // self.snapshot_executor.startup().await?;
+        self.log_manager.startup().await?;
+        // startup fsm_caller
+        self.fsm_caller.startup().await?;
+        // startup snapshot_executor
+        self.snapshot_executor.startup().await?;
         // confirm core_state by config cluster
-        self.handle_state_change().await?;
-        Ok(true)
+        self.core_notification.core_state_change().map_err(|e|{
+            LifeCycleError::StartupError(AnyError::from(&e))
+        })?;
+        Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<bool, LifeCycleError> {
-        // startup fsm_caller
+    async fn shutdown(&self) -> Result<(), LifeCycleError> {
+        // shutdown fsm_caller
         self.fsm_caller.shutdown().await?;
-        // startup log_manager
+        // shutdown log_manager
         self.log_manager.shutdown().await?;
-        // startup snapshot_executor
+        // shutdown snapshot_executor
         self.snapshot_executor.shutdown().await?;
 
-        Ok(true)
+        Ok(())
     }
 }
 
@@ -159,13 +155,12 @@ where
     rx_api: MpscUnboundedReceiverOf<C, ApiMsg<C>>,
     rx_notification: MpscUnboundedReceiverOf<C, NotificationMsg<C>>,
     core_notification: Arc<CoreNotification<C>>,
-    core_state: Arc<RwLock<CoreState<C, FSM>>>,
+    core_state: Arc<RwLock<Arc<CoreState<C, FSM>>>>,
     fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
     snapshot_executor: Arc<ReplicaComponent<C, SnapshotExecutor<C, FSM>>>,
     log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
     replica_group: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replica_client: Arc<C::ReplicaClient>,
-    meta_client: Arc<C::MetaClient>,
     replica_option: Arc<ReplicaOption>,
 }
 
@@ -174,15 +169,20 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
-    #[inline]
     fn handle_commit(&self, operation: Operation<C>) {
         let core_state = self.core_state.read().unwrap();
-        core_state.commit_operation(operation);
+        let result = core_state.commit_operation(operation);
+        if let Err(e) = result {
+            if let Some(callback ) = e.operation.callback {
+                let _ = send_result::<C, C::Response, PacificaError<C>>(callback, Err(e.error));
+            }
+        }
     }
 
     #[inline]
     async fn handle_replica_recover(&mut self) -> Result<(), PacificaError<C>> {
-        self.core_state.replica_recover().await
+        let core_state = self.core_state.read().unwrap().clone();
+        core_state.replica_recover().await
     }
 
     async fn handle_transfer_primary(
@@ -190,9 +190,12 @@ where
         new_primary: ReplicaId<C::NodeId>,
         timeout: Duration,
     ) -> Result<(), PacificaError<C>> {
-        let result = self.core_state.transfer_primary(new_primary, timeout).await;
+        let result = {
+            let core_state = self.core_state.read().unwrap().clone();
+            core_state.transfer_primary(new_primary, timeout).await
+        };
         if result.is_ok() {
-            let _ = self.handle_state_change();
+            let _ = self.handle_state_change().await;
         }
         result
     }
@@ -213,7 +216,7 @@ where
             }
             ApiMsg::SaveSnapshot { callback } => {
                 let result = self.handle_save_snapshot().await;
-                let _ = send_result(callback, result);
+                let _ = send_result::<C, LogId, PacificaError<C>>(callback, result);
             }
             ApiMsg::TransferPrimary {
                 new_primary,
@@ -221,7 +224,7 @@ where
                 callback,
             } => {
                 let result = self.handle_transfer_primary(new_primary, timeout).await;
-                let _ = send_result(callback, result);
+                let _ = send_result::<C, (), PacificaError<C>>(callback, result);
             }
         }
     }
@@ -248,7 +251,8 @@ where
     }
 
     pub(crate) fn get_replica_state(&self) -> ReplicaState {
-        self.core_state.get_replica_state()
+        let core_state = self.core_state.read().unwrap();
+        core_state.get_replica_state()
     }
 
     async fn handle_receive_higher_term(&mut self, term: usize) -> Result<(), LifeCycleError> {
@@ -266,23 +270,37 @@ where
     }
 
     fn handle_send_commit_result(&self, result: CommitResult<C>) -> Result<(), LifeCycleError> {
-        if self.core_state.is_primary() {
-            self.core_state.send_commit_result(result)?;
+        let core_state = self.core_state.read().unwrap();
+        if core_state.is_primary() {
+            let _ = core_state.send_commit_result(result);
         }
         Ok(())
     }
 
     async fn handle_state_change(&mut self) -> Result<(), LifeCycleError> {
-        let old_replica_state = self.core_state.get_replica_state();
-        let new_replica_state = self.replica_group.get_state(self.replica_id.clone()).await;
-        if old_replica_state != new_replica_state {
-            // state change
-            let mut new_core_state = self.new_core_state(new_replica_state).await;
-            new_core_state.startup().await?;
-            let _ = self.core_state.shutdown().await;
-            self.core_state = new_core_state;
+        let old_replica_state = self.get_replica_state();
+        let new_replica_state = self.replica_group.get_state(&self.replica_id).await;
+        let old_core_state = {
+            if old_replica_state != new_replica_state {
+                // state change
+                let new_core_state = self.new_core_state(new_replica_state).await;
+                new_core_state.startup().await?;
+                let new_core_state = Arc::new(new_core_state);
+                let mut core_state = self.core_state.write().unwrap();
+                let old_core_state = std::mem::replace(&mut *core_state, new_core_state);
+                Some(old_core_state)
+            } else {
+                None
+            }
+        };
+        if let Some(old_core_state) = old_core_state {
+            let _ = old_core_state.shutdown().await;
         }
         Ok(())
+    }
+
+    fn get_core_state(&self) -> ReplicaState {
+        self.core_state.read().unwrap().get_replica_state()
     }
 
     async fn handle_report_fatal(&mut self, fatal: Fatal) {
@@ -380,9 +398,11 @@ where
                     match notification_msg{
                         Some(msg) => {
                             let result =  self.handle_notification_msg(msg).await;
-                            result.map_err(|e| {
-                                tracing::warn!("ReplicaCore handle notification msg, but Fatal: {}", e)
-                            })
+                            if let Err(e) = result {
+                                tracing::error!("handle notification msg error: {:?}", e);
+                                break;
+                            }
+
                         },
                         None => {
 
@@ -403,8 +423,8 @@ where
 {
     type LoopHandler = WorkHandler<C, FSM>;
 
-    fn new_loop_handler(&mut self) -> Option<Self::LoopHandler> {
-        self.work_handler.take()
+    fn new_loop_handler(&self) -> Option<Self::LoopHandler> {
+        self.work_handler.lock().unwrap().take()
     }
 }
 
@@ -428,33 +448,33 @@ where
         &self,
         request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, RpcServiceError> {
-        self.core_state.handle_append_entries_request(request).await.map_err(|e| RpcServiceError::from(e))
+        self.core_state.read().unwrap().handle_append_entries_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError> {
-        self.core_state.handle_transfer_primary_request(request).await.map_err(|e| RpcServiceError::from(e))
+        self.core_state.read().unwrap().handle_transfer_primary_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
-        self.core_state.handle_replica_recover_request(request).await.map_err(|e| RpcServiceError::from(e))
+        self.core_state.read().unwrap().handle_replica_recover_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_install_snapshot_request(
         &self,
         request: InstallSnapshotRequest<C>,
     ) -> Result<InstallSnapshotResponse, RpcServiceError> {
-        let replica_group = self.replica_group.get_replica_group().await.map_err(|e| PacificaError::MetaError(e))?;
+        let replica_group = self.replica_group.get_replica_group().await?;
         let version = replica_group.version();
         if request.version > version {
             let _ = self.core_notification.higher_version(request.version);
         }
-        if replica_group.is_primary(self.replica_id.clone()) {
+        if replica_group.is_primary(&self.replica_id) {
             return Err(RpcServiceError::replica_state_error("replica is primary"));
         }
         let term = replica_group.term();

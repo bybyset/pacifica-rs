@@ -84,7 +84,8 @@ where
     }
 
     pub(crate) fn is_alive(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
-        let replicator = self.replicators.read().unwrap().get(replica_id);
+        let replicators = self.replicators.read().unwrap();
+        let replicator = replicators.get(replica_id);
         let alive = {
             match replicator {
                 Some(replicator) => self.is_alive_replicator(replicator),
@@ -117,8 +118,11 @@ where
         self.replica_group_agent.current_id()
     }
 
-    pub(crate) fn get_replicator_ids(&self) -> Vec<&ReplicaId<C::NodeId>> {
-        self.replicators.read().unwrap().keys().collect()
+    pub(crate) fn get_replicator_ids(&self) -> Vec<ReplicaId<C::NodeId>> {
+        let replicators = self.replicators.read().unwrap();
+        replicators.keys().map(|replica_id|{
+            replica_id.clone()
+        }).collect()
     }
 
     pub(crate) async fn remove_replicator(&self, target_id: &ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
@@ -196,19 +200,7 @@ where
         replicator_type: ReplicatorType,
     ) -> ReplicaComponent<C, Replicator<C, FSM>> {
         let primary_id = self.replica_group_agent.current_id();
-        let replicator = Replicator::new(
-            primary_id,
-            target_id,
-            replicator_type,
-            self.log_manager.clone(),
-            self.fsm_caller.clone(),
-            self.snapshot_executor.clone(),
-            self.replica_client.clone(),
-            self.ballot_box.clone(),
-            self.core_notification.clone(),
-            self.replica_options.clone(),
-            self.replica_group_agent.clone(),
-        );
+        let replicator = Replicator::new(primary_id, target_id, replicator_type, self.log_manager.clone(), self.fsm_caller.clone(), self.snapshot_executor.clone(), self.replica_group_agent.clone(), self.ballot_box.clone(), self.core_notification.clone(), self.replica_options.clone(), self.replica_client.clone());
         ReplicaComponent::new(replicator)
     }
 }

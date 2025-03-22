@@ -5,7 +5,7 @@ use crate::core::task_sender::TaskSender;
 use crate::core::ResultSender;
 use crate::error::{LifeCycleError, PacificaError};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
-use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
+use crate::type_config::alias::{MetaClientOf, MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::send_result;
 use crate::{ReplicaGroup, ReplicaId, ReplicaState, TypeConfig};
 use std::sync::{Arc, Mutex, RwLock};
@@ -24,7 +24,7 @@ impl<C> ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(current_id: ReplicaId<C::NodeId>, meta_client: C::MetaClient) -> Self {
+    pub(crate) fn new(current_id: ReplicaId<C::NodeId>, meta_client: MetaClientOf<C>) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let replica_group = Arc::new(RwLock::new(None));
 

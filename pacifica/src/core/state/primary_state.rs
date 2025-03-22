@@ -226,7 +226,7 @@ where
         let replica_ids = self.replicator_group.get_replicator_ids();
         if !replica_ids.is_empty() {
             for replica_id in replica_ids.into_iter() {
-                if !self.replicator_group.is_alive(replica_id) {
+                if !self.replicator_group.is_alive(&replica_id) {
                     let replica_id = ReplicaId::<C::NodeId>::new(replica_id.group_name(), replica_id.node_id());
                     let (callback, rx) = C::oneshot();
                     let result = self.tx_task.send(Task::RemoveSecondary { replica_id, callback });

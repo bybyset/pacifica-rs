@@ -57,19 +57,13 @@ where
             component: component,
         }
     }
-}
 
-impl<C, T> Lifecycle<C> for ReplicaComponent<C, T>
-where
-    C: TypeConfig,
-    T: Component<C>,
-{
-    async fn startup(&self) -> Result<(), LifeCycleError> {
+    fn do_startup(&self) -> bool {
         let mut shutdown = self.tx_shutdown.lock().unwrap();
         match *shutdown {
             Some(_) => {
                 // repeated startup
-                Ok(())
+                false
             }
             None => {
                 let (tx_shutdown, rx_shutdown) = C::oneshot();
@@ -82,15 +76,32 @@ where
                     }
                     None => {}
                 }
-                self.component.startup().await?;
-                Ok(())
+                true
             }
         }
     }
+}
+
+impl<C, T> Lifecycle<C> for ReplicaComponent<C, T>
+where
+    C: TypeConfig,
+    T: Component<C>,
+{
+    async fn startup(&self) -> Result<(), LifeCycleError> {
+        if self.do_startup() {
+            self.component.startup().await?;
+        }
+        // repeated startup
+        Ok(())
+    }
+
+
 
     async fn shutdown(&self) -> Result<(), LifeCycleError> {
-        let mut shutdown = self.tx_shutdown.lock().unwrap();
-        let shutdown = shutdown.take();
+        let shutdown = {
+            let mut shutdown = self.tx_shutdown.lock().unwrap();
+            shutdown.take()
+        };
         match shutdown {
             None => {
                 // repeated shutdown or un startup
@@ -100,7 +111,10 @@ where
                 // send shutdown msg
                 let _ = tx_shutdown.send(());
                 // wait
-                if let Some(loop_handler) = self.join_handler.lock().unwrap().take() {
+                let loop_handler = {
+                    self.join_handler.lock().unwrap().take()
+                };
+                if let Some(loop_handler) = loop_handler {
                     let _ = loop_handler.await;
                 }
                 self.component.shutdown().await?;

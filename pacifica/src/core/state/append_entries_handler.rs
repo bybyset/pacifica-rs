@@ -7,7 +7,6 @@ use crate::error::{PacificaError};
 use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse};
 use crate::{LogEntry, ReplicaOption, StateMachine, TypeConfig};
 use std::sync::{Arc, RwLock};
-use futures::TryFutureExt;
 use crate::runtime::TypeConfigExt;
 use crate::type_config::alias::InstantOf;
 use crate::util::Leased;
@@ -113,21 +112,21 @@ where
             }
             if first.log_id.index != last_log_index + 1 {
                 // 遍历寻找冲突日志
-                for log_entry in log_entries {
+                for log_entry in log_entries.iter() {
                     let log_index = log_entry.log_id.index;
-                    let local_term = self.log_manager.get_log_term_at(log_index).map_err(|e| {
+                    let local_term = self.log_manager.get_log_term_at(log_index).await.map_err(|e| {
                         CheckConflictError::LogManagerError(e)
-                    });
+                    })?;
                     if local_term != log_entry.log_id.term {
                         break;
                     }
                 }
-                let conflict = self.find_conflict_log_entry(log_entries).await?;
+                let conflict = self.find_conflict_log_entry(&log_entries).await?;
                 if let Some(conflict) = conflict {
                     // 发现冲突日志
                     if conflict.log_id.index <= last_log_index {
                         // 需要裁剪后缀
-                        let _ = self.log_manager.truncate_suffix(conflict.log_id.index - 1).await?;
+                        let _ = self.log_manager.truncate_suffix(conflict.log_id.index - 1).await;
                     }
                     let start = conflict.log_id.index - first.log_id.index;
                     // 移除已持久化日志，不包含冲突处的日志
@@ -138,10 +137,11 @@ where
         Ok(())
     }
 
-    async fn find_conflict_log_entry(
+    async fn find_conflict_log_entry<'a>(
         &self,
-        log_entries: &Vec<LogEntry>,
-    ) -> Result<Option<&LogEntry>, LogManagerError> {
+        log_entries: &'a Vec<LogEntry>,
+    ) -> Result<Option<&'a LogEntry>, LogManagerError> {
+
         for log_entry in log_entries {
             let log_index = log_entry.log_id.index;
             let local_term = self.log_manager.get_log_term_at(log_index).await?;

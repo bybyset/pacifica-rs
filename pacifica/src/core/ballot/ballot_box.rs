@@ -12,7 +12,6 @@ use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, 
 use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::send_result;
 use crate::{ReplicaGroup, ReplicaId, StateMachine, TypeConfig};
-use futures::{SinkExt};
 use std::cmp::{max, min};
 use std::collections::vec_deque::Iter;
 use std::collections::VecDeque;
@@ -390,7 +389,7 @@ where
                 if let Some(result_sender) = ballot_context.result_sender {
                     let result =
                         result.map_err(|e| PacificaError::<C>::UserFsmError(UserStateMachineError::while_commit_entry(e)));
-                    let _ = send_result(result_sender, result);
+                    let _ = send_result::<C, <C as TypeConfig>::Response, PacificaError<C>>(result_sender, result);
                 }
             } else {
                 // warn log
@@ -420,17 +419,25 @@ where
         Ok(false)
     }
 
+    fn get_pending_index(&self) -> usize {
+        self.pending_index.load(Relaxed)
+    }
+    fn get_last_committed_index(&self) -> usize {
+        self.last_committed_index.load(Relaxed)
+    }
+
     fn do_recover_ballot(&mut self, replica_id: ReplicaId<C::NodeId>, start_log_index: usize) {
         assert!(start_log_index >= self.get_pending_index());
         assert!(start_log_index > self.get_last_committed_index());
 
         let pending_index = self.pending_index.load(Relaxed);
         let start_index = start_log_index - pending_index;
-        if start_index < self.ballot_queue.len() {
-            self.ballot_queue
+        let mut ballot_queue = self.ballot_queue.write().unwrap();
+        if start_index < ballot_queue.len() {
+            ballot_queue
                 .range_mut(start_index..) //
                 .for_each(|ballot_context| {
-                    ballot_context.ballot.add_quorum(replica_id);
+                    ballot_context.ballot.add_quorum(replica_id.clone());
                 });
         }
     }
@@ -442,7 +449,8 @@ where
     }
 
     fn on_shutdown(&mut self) {
-        while let Some(ballot_context) = self.ballot_queue.pop_front() {
+        let mut ballot_queue = self.ballot_queue.write().unwrap();
+        while let Some(ballot_context) = ballot_queue.pop_front() {
             if let Some(result_sender) = ballot_context.result_sender {
                 let _ = result_sender.send(Err(PacificaError::Shutdown));
             }

@@ -3,6 +3,7 @@ use crate::error::PacificaError;
 use crate::pacifica::Codec;
 use crate::TypeConfig;
 use bytes::Bytes;
+use std::fmt::{Debug, Display, Formatter};
 
 pub(crate) struct Operation<C>
 where
@@ -47,8 +48,37 @@ where
     }
 }
 
-impl<C> Default for Operation<C> where C: TypeConfig {
+impl<C> Default for Operation<C>
+where
+    C: TypeConfig,
+{
     fn default() -> Self {
         Operation::new_empty()
+    }
+}
+
+impl<C> Debug for Operation<C>
+where
+    C: TypeConfig,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(req) = &self.request {
+            let _ = write!(f, "Request: {:?} .", req);
+        } else {
+            let _ = write!(f, "Request: Empty .");
+        }
+        if let Some(req_bytes) = &self.request_bytes {
+            let _ = write!(f, "Request Encode Bytes: [len={}].", req_bytes.len());
+        }
+        if self.callback.is_some() {
+            let _ = write!(f, "Has callback!");
+        }
+        write!(f, "")
+    }
+}
+
+impl<C: TypeConfig> Display for Operation<C> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }

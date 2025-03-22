@@ -6,7 +6,7 @@ use crate::core::task_sender::TaskSender;
 use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::RpcServiceError;
-use crate::runtime::{MpscUnboundedReceiver, MpscUnboundedSender, OneshotSender, TypeConfigExt};
+use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotDownloader};
 use crate::type_config::alias::{
     MpscUnboundedReceiverOf,  OneshotReceiverOf, SnapshotReaderOf,
@@ -16,9 +16,7 @@ use crate::util::{send_result, AutoClose, RepeatedTask, RepeatedTimer};
 use crate::{LogId, ReplicaId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
 use anyerror::AnyError;
 use futures::FutureExt;
-use futures::TryStreamExt;
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::io::AsyncWriteExt;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
 where
@@ -45,7 +43,9 @@ where
         let snapshot_storage = Arc::new(RwLock::new(snapshot_storage));
         let (tx_task, rx_task) = C::mpsc_unbounded();
 
-        let snapshot_saver = SnapshotSaver::new(tx_task.clone());
+        let snapshot_saver: SnapshotSaver<C> = SnapshotSaver::new(
+            TaskSender::new(tx_task.clone())
+            );
         let snapshot_timer = RepeatedTimer::new(snapshot_saver, replica_option.snapshot_save_interval(), false);
 
         let work_handler = WorkHandler::new(
@@ -155,7 +155,7 @@ where
     FSM: StateMachine<C>,
 {
     fn new(
-        snapshot_storage: C::SnapshotStorage,
+        snapshot_storage: Arc<RwLock<C::SnapshotStorage>>,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         replica_option: Arc<ReplicaOption>,

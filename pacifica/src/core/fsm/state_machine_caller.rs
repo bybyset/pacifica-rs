@@ -52,10 +52,10 @@ where
             rx_task,
         );
 
-        let mut fsm_caller = StateMachineCaller {
+        let fsm_caller = StateMachineCaller {
             committed_log_index,
             work_handler: Mutex::new(Some(work_handler)),
-            tx_task,
+            tx_task: TaskSender::new(tx_task),
         };
         fsm_caller
     }
@@ -340,7 +340,11 @@ where
             start_log_index,
             commit_result,
         };
-        self.core_notification.send_commit_result(commit_result)?;
+        let result = self.core_notification.send_commit_result(commit_result);
+        if let Err(e) = result {
+            tracing::error!("StateMachineCaller send commit result error: {}", e);
+            return Err(LifeCycleError::Shutdown)
+        }
         Ok(())
     }
 
