@@ -24,15 +24,13 @@ macro_rules! declare_pacifica_types {
                 (T, ATTR, V) => {ATTR type T = V;},
                 $(($type_id, $(#[$inner])*, $type),)*
 
-                // Default types:
-                // (D            , , String                                ),
-                // (R            , , String                                ),
-                // (NodeId       , , u64                                   ),
-                // (Node         , , $crate::impls::BasicNode              ),
-                // (Entry        , , $crate::impls::Entry<Self>            ),
-                // (SnapshotData , , std::io::Cursor<Vec<u8>>                       ),
-                // (Responder    , , $crate::impls::OneshotResponder<Self> ),
-                // (AsyncRuntime , , $crate::impls::TokioRuntime           ),
+                Default types:
+                (NodeId       , , $crate::StrNodeId                                   ),
+                (AsyncRuntime         , , $crate::TokioRuntime              ),
+                (ReplicaClient        , , $crate::impls::Entry<Self>            ),
+                (LogStorage , , std::io::Cursor<Vec<u8>>                       ),
+                (SnapshotStorage    , , $crate::impls::OneshotResponder<Self> ),
+                (AsyncRuntime , , $crate::impls::TokioRuntime           ),
             );
 
         }

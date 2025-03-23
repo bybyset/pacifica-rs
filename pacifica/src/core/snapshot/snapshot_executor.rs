@@ -7,16 +7,17 @@ use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{InstallSnapshotRequest, InstallSnapshotResponse};
 use crate::rpc::RpcServiceError;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
-use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotDownloader};
+use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotDownloader, SnapshotStorage, StorageError};
 use crate::type_config::alias::{
     MpscUnboundedReceiverOf,  OneshotReceiverOf, SnapshotReaderOf,
     SnapshotStorageOf,
 };
 use crate::util::{send_result, AutoClose, RepeatedTask, RepeatedTimer};
-use crate::{LogId, ReplicaId, ReplicaOption, SnapshotStorage, StateMachine, StorageError, TypeConfig};
+use crate::{LogId, ReplicaId, ReplicaOption, TypeConfig};
 use anyerror::AnyError;
 use futures::FutureExt;
 use std::sync::{Arc, Mutex, RwLock};
+use crate::fsm::StateMachine;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
 where

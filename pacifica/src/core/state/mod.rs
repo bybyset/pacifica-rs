@@ -15,10 +15,11 @@ use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use crate::{ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
+use crate::{ReplicaId, ReplicaOption, ReplicaState, TypeConfig};
 use std::sync::Arc;
 use std::time::Duration;
 use crate::core::snapshot::SnapshotExecutor;
+use crate::fsm::StateMachine;
 
 mod append_entries_handler;
 mod candidate_state;

@@ -1,5 +1,6 @@
-use crate::{Replica, ReplicaId, StateMachine, TypeConfig};
+use crate::{Replica, ReplicaId, TypeConfig};
 use std::collections::HashMap;
+use crate::fsm::StateMachine;
 
 pub trait ReplicaRouter<C, FSM>
 where

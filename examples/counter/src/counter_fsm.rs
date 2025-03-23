@@ -1,44 +1,29 @@
-use std::io::Error;
-use pacifica_rs::{StateMachine, TypeConfig};
+use std::sync::atomic::{AtomicU64, Ordering};
+use pacifica_rs::StateMachine;
 
 pub(crate) struct CounterFSM {
-
+    counter: AtomicU64,
 }
 
-
-impl<C> StateMachine<C> for CounterFSM
-where C : TypeConfig {
-
-    type Reader = ();
-    type Writer = ();
-
-    async fn on_commit<I>(&self, entries: I) -> Result<C::Response, Error>
-    where
-        I: IntoIterator<Item=pacifica_rs::fsm::Entry<C>>
-    {
-        let entries = entries.into_iter();
-        for entry in entries {
-            println!("{:?}", entry.log_id);
-            println!("{:?}", entry.request);
-
+impl CounterFSM {
+    pub(crate) fn new() -> Self {
+        CounterFSM {
+            counter: AtomicU64::new(0),
         }
-
-        Ok(0)
     }
 
-    async fn on_load_snapshot(&self, snapshot_reader: &Self::Reader) -> Result<(), Error> {
-        todo!()
+    pub(crate) fn inc(&self) -> u64{
+        self.counter.fetch_add(1, Ordering::Relaxed)
     }
 
-    async fn on_save_snapshot(&self, snapshot_writer: &Self::Writer) -> Result<(), Error> {
-        todo!()
+    pub(crate) fn dec(&self) -> u64{
+        self.counter.fetch_sub(1, Ordering::Relaxed)
     }
 
-    async fn on_shutdown(&self) -> Result<(), Error> {
-        todo!()
+    pub(crate) fn get(&self) -> u64{
+        self.counter.load(Ordering::Relaxed)
     }
 
-    async fn on_error(&self) -> Result<(), Error> {
-        todo!()
-    }
 }
+
+impl StateMachine<>

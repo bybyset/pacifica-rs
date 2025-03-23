@@ -16,11 +16,11 @@ use crate::storage::GetFileService;
 use crate::type_config::alias::{LogStorageOf, MetaClientOf, NodeIdOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::ReplicaId;
 use crate::ReplicaOption;
-use crate::StateMachine;
 use crate::TypeConfig;
 use crate::{LogId, ReplicaState};
 use std::sync::Arc;
 use std::time::Duration;
+use crate::fsm::StateMachine;
 
 pub struct Replica<C, FSM>
 where

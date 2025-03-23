@@ -1028,6 +1028,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pacifica-rs-rpc-impl-grpc"
+version = "1.0.0"
+dependencies = [
+ "anyerror",
+ "bytes",
+ "pacifica-rs",
+ "prost",
+ "prost-build",
+ "prost-derive",
+ "thiserror 2.0.3",
+ "tonic",
+ "tonic-build",
+ "tracing",
+]
+
+[[package]]
 name = "pacifica-rs-segment-logstore"
 version = "1.0.0"
 dependencies = [
@@ -1352,22 +1368,6 @@ checksum = "26ec73b20525cb235bad420f911473b69f9fe27cc856c5461bccd7e4af037f43"
 dependencies = [
  "libc",
  "librocksdb-sys",
-]
-
-[[package]]
-name = "rpc-impl-grpc"
-version = "1.0.0"
-dependencies = [
- "anyerror",
- "bytes",
- "pacifica-rs",
- "prost",
- "prost-build",
- "prost-derive",
- "thiserror 2.0.3",
- "tonic",
- "tonic-build",
- "tracing",
 ]
 
 [[package]]

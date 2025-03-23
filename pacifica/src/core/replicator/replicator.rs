@@ -15,17 +15,18 @@ use crate::rpc::message::{
 };
 use crate::rpc::{ReplicaClient, RpcClientError, RpcOption};
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
-use crate::storage::SnapshotReader;
+use crate::storage::{SnapshotReader, StorageError};
 use crate::type_config::alias::{
     InstantOf, MpscUnboundedReceiverOf, OneshotReceiverOf,
 };
 use crate::util::{send_result, ByteSize, RepeatedTask, RepeatedTimer};
-use crate::{LogId, ReplicaId, ReplicaOption, StateMachine, StorageError, TypeConfig};
+use crate::{LogId, ReplicaId, ReplicaOption, TypeConfig};
 use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+use crate::fsm::StateMachine;
 
 pub(crate) struct Replicator<C, FSM>
 where

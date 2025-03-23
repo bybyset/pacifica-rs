@@ -6,17 +6,17 @@ use crate::core::log::{LogManager, LogManagerError};
 use crate::core::task_sender::TaskSender;
 use crate::core::{CoreNotification};
 use crate::error::{Fatal, IllegalSnapshotError, LifeCycleError, PacificaError};
-use crate::fsm::{Entry, UserStateMachineError};
+use crate::fsm::{Entry, StateMachine, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
-use crate::storage::{SnapshotReader, SnapshotWriter};
+use crate::storage::{SnapshotReader, SnapshotWriter, StorageError};
 use crate::type_config::alias::{
     MpscUnboundedReceiverOf, OneshotReceiverOf, SnapshotReaderOf,
     SnapshotWriteOf,
 };
 use crate::util::{send_result, AutoClose};
-use crate::{LogId, StateMachine, StorageError, TypeConfig};
+use crate::{LogId, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

@@ -10,12 +10,12 @@ use crate::type_config::alias::{
     LogWriteOf, MpscUnboundedReceiverOf, OneshotReceiverOf
 };
 use crate::util::{send_result, Checksum};
-use crate::{LogEntry, LogId, LogStorage, ReplicaOption, StorageError, TypeConfig};
-use crate::{LogReader, LogWriter};
+use crate::{LogEntry, LogId, ReplicaOption, TypeConfig};
 use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use crate::storage::{LogReader, LogStorage, LogWriter, StorageError};
 
 pub(crate) struct LogManager<C>
 where

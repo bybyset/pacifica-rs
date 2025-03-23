@@ -1,6 +1,6 @@
 use crate::config_cluster::MetaError;
 use crate::pacifica::{DecodeError, EncodeError};
-use crate::{LogId, ReplicaState, StorageError, TypeConfig};
+use crate::{LogId, ReplicaState, TypeConfig};
 use anyerror::AnyError;
 use std::error::Error as StdError;
 use std::fmt::{Debug, Display, Formatter};
@@ -11,6 +11,7 @@ pub use crate::rpc::ConnectError;
 pub use crate::rpc::RpcClientError;
 pub use crate::rpc::RpcServiceError;
 use crate::runtime::ReceiveError;
+use crate::storage::StorageError;
 use crate::type_config::alias::{OneshotReceiverErrorOf};
 
 #[derive(Debug)]

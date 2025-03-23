@@ -18,10 +18,11 @@ use crate::type_config::alias::{
     MpscUnboundedReceiverOf, OneshotReceiverOf,
 };
 use crate::util::{send_result, RepeatedTask, RepeatedTimer};
-use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, StateMachine, TypeConfig};
+use crate::{LogEntry, LogId, ReplicaId, ReplicaOption, TypeConfig};
 use anyerror::AnyError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use crate::fsm::StateMachine;
 
 pub(crate) struct PrimaryState<C, FSM>
 where

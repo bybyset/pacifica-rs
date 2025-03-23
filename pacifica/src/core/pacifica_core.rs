@@ -19,10 +19,11 @@ use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::GetFileService;
 use crate::type_config::alias::{LogStorageOf, MetaClientOf, MpscUnboundedReceiverOf, NodeIdOf, OneshotReceiverOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::util::{send_result};
-use crate::{LogId, ReplicaId, ReplicaOption, ReplicaState, StateMachine, TypeConfig};
+use crate::{LogId, ReplicaId, ReplicaOption, ReplicaState, TypeConfig};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use anyerror::AnyError;
+use crate::fsm::StateMachine;
 
 pub(crate) struct ReplicaCore<C, FSM>
 where

@@ -1,6 +1,7 @@
 use thiserror::Error;
 use crate::error::{CorruptedLogEntryError, NotFoundLogEntry, PacificaError};
-use crate::{StorageError, TypeConfig};
+use crate::{TypeConfig};
+use crate::storage::StorageError;
 
 #[derive(Debug, Error)]
 pub enum LogManagerError

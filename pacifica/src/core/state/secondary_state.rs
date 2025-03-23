@@ -12,8 +12,9 @@ use crate::rpc::message::{
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::type_config::alias::{InstantOf, MpscUnboundedReceiverOf, OneshotReceiverOf};
 use crate::util::{send_result, Leased, RepeatedTask, RepeatedTimer};
-use crate::{ReplicaOption, StateMachine, TypeConfig};
+use crate::{ReplicaOption, TypeConfig};
 use std::sync::{Arc, Mutex, RwLock};
+use crate::fsm::StateMachine;
 
 pub(crate) struct SecondaryState<C, FSM>
 where

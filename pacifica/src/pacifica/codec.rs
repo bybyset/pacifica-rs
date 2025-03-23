@@ -23,6 +23,22 @@ pub struct DecodeError
     pub source: AnyError,
 }
 
+impl DecodeError {
+
+    pub fn new(decode: Bytes, source: AnyError) -> Self {
+        DecodeError {
+            decode,
+            source,
+        }
+    }
+
+    pub fn with_msg(decode: Bytes, msg: impl ToString) -> Self {
+        DecodeError {
+            decode,
+            source: AnyError::error(msg),
+        }
+    }
+}
 impl<T> Debug for EncodeError<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to encode. error: {}", self.source)

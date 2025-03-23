@@ -1,10 +1,10 @@
 use crate::config_cluster::MetaClient;
-use crate::pacifica::{Codec, Response};
+use crate::pacifica::{Codec, Request, Response};
 use crate::rpc::ReplicaClient;
 use crate::runtime::AsyncRuntime;
-use crate::{LogStorage, Request, SnapshotStorage};
 use std::fmt::{Debug, Display};
 use std::hash::Hash;
+use crate::storage::{LogStorage, SnapshotStorage};
 
 pub trait NodeIdEssential:
     From<String>
@@ -53,13 +53,11 @@ pub trait TypeConfig: Sized + Send + Sync + Debug + Clone + Copy + Default +  Eq
     type Request: Request;
     type Response: Response;
     type RequestCodec: Codec<Self::Request>;
-
-    type AsyncRuntime: AsyncRuntime;
+    type MetaClient: MetaClient<Self>;
 
     type NodeId: NodeId;
-
+    type AsyncRuntime: AsyncRuntime;
     type ReplicaClient: ReplicaClient<Self>;
-    type MetaClient: MetaClient<Self>;
     type LogStorage: LogStorage;
     type SnapshotStorage: SnapshotStorage<Self>;
 }
@@ -67,7 +65,9 @@ pub trait TypeConfig: Sized + Send + Sync + Debug + Clone + Copy + Default +  Eq
 pub mod alias {
     use crate::runtime::{Mpsc, MpscUnbounded, Oneshot, Watch};
     use crate::TypeConfig;
-    use crate::{AsyncRuntime, LogStorage, SnapshotStorage};
+    use crate::{AsyncRuntime};
+    use crate::storage::{LogStorage, SnapshotStorage};
+
     pub type NodeIdOf<C> = <C as TypeConfig>::NodeId;
     pub type MetaClientOf<C> = <C as TypeConfig>::MetaClient;
     pub type ReplicaClientOf<C> = <C as TypeConfig>::ReplicaClient;

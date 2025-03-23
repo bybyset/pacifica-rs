@@ -1,8 +1,14 @@
 [package]
-name = "counter"
+name = "pacifica-rs-example-counter"
+description = "A counter example for pacifica-rs"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 
 pacifica-rs = { path = "../../pacifica" }
+pacifica-rs-rocksdb-logstore = {path = "../../extension/rocksdb-logstore"}
+pacifica-rs-rpc-impl-grpc = {path = "../../extension/rpc-impl-grpc"}
+
+
+bytes = "1.9.0"

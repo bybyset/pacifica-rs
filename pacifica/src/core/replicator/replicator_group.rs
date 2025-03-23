@@ -11,10 +11,11 @@ use crate::error::{ConnectError, LifeCycleError, PacificaError};
 use crate::rpc::ConnectionClient;
 use crate::runtime::TypeConfigExt;
 use crate::type_config::alias::TimeoutErrorOf;
-use crate::{ReplicaId, ReplicaOption, StateMachine, TypeConfig};
+use crate::{ReplicaId, ReplicaOption, TypeConfig};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use crate::fsm::StateMachine;
 
 pub(crate) struct ReplicatorGroup<C, FSM>
 where
