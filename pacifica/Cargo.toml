@@ -25,6 +25,7 @@ anyerror = { workspace = true }
 clap = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, optional = true }
+rocksdb = {workspace = true, optional = true}
 
 pacifica-rs-macros = { path = "../macros" }
 log = "0.4.22"
@@ -32,8 +33,9 @@ log = "0.4.22"
 
 [features]
 
-default = ["tokio-runtime", "snapshot-storage-fs"]
+default = ["tokio-runtime", "snapshot-storage-fs", "log-storage-rocksdb"]
 
 # Enable the default Tokio runtime
 tokio-runtime = ["dep:tokio"]
+log-storage-rocksdb = ["dep:rocksdb"]
 snapshot-storage-fs = []

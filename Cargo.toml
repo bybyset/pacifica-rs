@@ -22,7 +22,6 @@ byteorder = "1.5.0"
 byte-unit = "5.1.4"
 thiserror = "2.0.3"
 anyerror = "0.1.12"
-anyhow = "1.0.93"
 clap = { version = "4.5.21", features = ["derive", "env"] }
 
 futures = "0.3.31"
@@ -35,18 +34,20 @@ tokio = { version = "1.41.1", default-features = false, features = [
     "time",
 ] }
 tonic = { version = "0.12.3", features = ["tls"] }
-tonic-build = {version = "0.12.3"}
-prost = {version = "0.13.5"}
-prost-derive = {version = "0.13.5"}
-prost-build = {version = "0.13.5"}
+tonic-build = { version = "0.12.3" }
+prost = { version = "0.13.5" }
+prost-derive = { version = "0.13.5" }
+prost-build = { version = "0.13.5" }
 
 quote = "1.0"
 proc-macro2 = "1.0"
 syn = "2.0"
 
+rocksdb = {version = "0.23.0"}
+
 
 [workspace]
-members = ["pacifica", "macros", "tests", "extension/rpc-impl-grpc", "extension/segment-logstore", "extension/rocksdb-logstore", ]
+members = ["pacifica", "macros", "tests", "extension/rpc-impl-grpc", ]
 
 exclude = [
     "examples/counter"

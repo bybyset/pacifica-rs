@@ -1,3 +1,4 @@
+
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::RpcServiceError;
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
@@ -29,6 +30,7 @@ const MT_CODEC_HEADER_LEN: usize = 4;
 const MT_CODEC_HEADER: [u8; MT_CODEC_HEADER_LEN] =
     [MT_CODEC_MAGIC, MT_CODEC_VERSION, MT_CODEC_RESERVED, MT_CODEC_RESERVED];
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
@@ -38,6 +40,7 @@ where
     inner: Arc<FsSnapshotStorageInner<C, T, GFC>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
@@ -50,6 +53,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FsSnapshotStorageInner<C, T, GFC>
 where
     C: TypeConfig,
@@ -63,6 +67,7 @@ where
     file_service: Arc<RwLock<FileService<C, T, GFC>>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -72,6 +77,7 @@ where
     file_service: Arc<RwLock<FileService<C, T, GFC>>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub(crate) struct FsSnapshotReaderInner<C, T, GFC>
 where
     C: TypeConfig,
@@ -86,6 +92,7 @@ where
     _phantom_data: PhantomData<C>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
@@ -99,6 +106,7 @@ where
     _phantom: PhantomData<C>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FsSnapshotDownloader<C, T, GFC>
 where
     C: TypeConfig,
@@ -110,6 +118,7 @@ where
     inner: Arc<FsSnapshotStorageInner<C, T, GFC>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotDownloader<C, T, GFC>
 where
     C: TypeConfig,
@@ -129,27 +138,32 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub trait FileMeta: PartialEq + Send + Sync + Clone + 'static {
     fn encode(&self) -> Vec<u8>;
 
     fn decode(bytes: Vec<u8>) -> Self;
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 struct SnapshotMetaTable<T: FileMeta> {
     log_id: LogId,
     file_map: HashMap<String, Option<T>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct DefaultFileMeta {
     pub check_sum: u64,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl PartialEq for DefaultFileMeta {
     fn eq(&self, other: &Self) -> bool {
         self.check_sum == other.check_sum
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl Clone for DefaultFileMeta {
     fn clone(&self) -> Self {
         DefaultFileMeta {
@@ -158,6 +172,7 @@ impl Clone for DefaultFileMeta {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl FileMeta for DefaultFileMeta {
     fn encode(&self) -> Vec<u8> {
         let mut buffer = Vec::new();
@@ -172,6 +187,7 @@ impl FileMeta for DefaultFileMeta {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<T: FileMeta> SnapshotMetaTable<T> {
     fn new_empty() -> SnapshotMetaTable<T> {
         SnapshotMetaTable {
@@ -270,6 +286,7 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotStorageInner<C, T, GFC>
 where
     C: TypeConfig,
@@ -394,6 +411,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
@@ -492,6 +510,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotReaderInner<C, T, GFC>
 where
     C: TypeConfig,
@@ -550,6 +569,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> Closeable for FsSnapshotReaderInner<C, T, GFC>
 where
     C: TypeConfig,
@@ -562,6 +582,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> Closeable for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -573,6 +594,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> SnapshotReader for FsSnapshotReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -595,6 +617,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> Closeable for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
@@ -606,6 +629,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> SnapshotWriter for FsSnapshotWriter<C, T, GFC>
 where
     C: TypeConfig,
@@ -626,6 +650,7 @@ where
         Ok(())
     }
 }
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> SnapshotDownloader for FsSnapshotDownloader<C, T, GFC>
 where
     C: TypeConfig,
@@ -672,6 +697,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> SnapshotStorage<C> for FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
@@ -718,6 +744,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> GetFileService<C> for FsSnapshotStorage<C, T, GFC>
 where
     C: TypeConfig,
@@ -730,6 +757,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn remove_dir_if_exists<P: AsRef<Path>>(dir: P) -> Result<(), Error> {
     let dir = dir.as_ref();
     if dir.exists() {
@@ -738,12 +766,14 @@ fn remove_dir_if_exists<P: AsRef<Path>>(dir: P) -> Result<(), Error> {
     Ok(())
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn write_string(buffer: &mut Vec<u8>, s: &String) {
     let len = s.len();
     buffer.write_u32::<BigEndian>(len as u32).unwrap();
     buffer.extend_from_slice(s.as_bytes());
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn read_string(meta_file: &mut File) -> Result<String, Error> {
     let str_len = meta_file.read_u64::<BigEndian>()?;
     let mut bytes = vec![0u8; str_len as usize];
@@ -751,6 +781,7 @@ fn read_string(meta_file: &mut File) -> Result<String, Error> {
     String::from_utf8(bytes).map_err(|e| Error::new(ErrorKind::InvalidData, e))
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn write_file_meta<T: FileMeta>(buffer: &mut Vec<u8>, file_meta: Option<&T>) {
     match file_meta {
         Some(meta) => {
@@ -769,6 +800,7 @@ fn write_file_meta<T: FileMeta>(buffer: &mut Vec<u8>, file_meta: Option<&T>) {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn read_file_meta<T: FileMeta>(meta_file: &mut File) -> Result<Option<T>, Error> {
     let len = meta_file.read_u64::<BigEndian>()?;
     if len > 0 {
@@ -780,6 +812,7 @@ fn read_file_meta<T: FileMeta>(meta_file: &mut File) -> Result<Option<T>, Error>
     Ok(None)
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn atomic_move_dir<P: AsRef<Path>>(src_dir: P, dest_dir: P) -> Result<(), Error> {
     // 2.1 check dest_dir exist , otherwise destroy it.
     let src_dir = src_dir.as_ref();
@@ -794,6 +827,7 @@ fn atomic_move_dir<P: AsRef<Path>>(src_dir: P, dest_dir: P) -> Result<(), Error>
     Ok(())
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 fn check_is_same<T: FileMeta>(
     filename: &str,
     meta_table1: &SnapshotMetaTable<T>,

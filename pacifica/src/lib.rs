@@ -29,12 +29,15 @@ pub use crate::str_node_id::StrNodeId;
 pub use crate::config_cluster::MetaClient;
 
 pub use crate::options::ReplicaOption;
-pub use crate::type_config::TypeConfig;
-pub use crate::type_config::NodeId;
-pub use crate::runtime::AsyncRuntime;
 
+pub use crate::type_config::TypeConfig;
+pub use crate::type_config::NodeIdEssential;
+pub use crate::type_config::NodeId;
+pub use crate::type_config::alias::*;
+pub use crate::runtime::AsyncRuntime;
 #[cfg(feature = "tokio-runtime")]
 pub use crate::runtime::tokio_impl::TokioRuntime;
+
 
 
 

@@ -1,11 +1,23 @@
-use crate::util::{from_key, to_key};
 use anyerror::AnyError;
-use pacifica_rs::{DefaultLogEntryCodec, LogEntry, LogEntryCodec, LogReader, LogStorage, LogWriter};
 use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, IteratorMode, Options, WriteBatch, DB};
 use std::path::Path;
 use std::sync::Arc;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use crate::LogEntry;
+use crate::storage::{LogEntryCodec, DefaultLogEntryCodec, LogReader, LogStorage, LogWriter};
 
 const COLUMN_LOG_ENTRY: &str = "log_entry";
+
+
+pub fn to_key(log_index: usize) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(8);
+    buf.write_u64::<BigEndian>(log_index as u64).unwrap();
+    buf
+}
+
+pub fn from_key(buf: &[u8]) -> usize {
+    (&buf[0..8]).read_u64::<BigEndian>().unwrap() as usize
+}
 
 #[derive(Debug, Clone)]
 pub struct RocksdbLogStore {
@@ -33,7 +45,7 @@ impl RocksdbLogStore {
         let mut iter = self.rocksdb.iterator_cf(self.cf_log_entry(), direction);
         match iter.next() {
             Some(item) => {
-                let (key, _) = item.map_err(|e| AnyError::from(e))?;
+                let (key, _) = item.map_err(|e| AnyError::from(&e))?;
                 let log_index = from_key(key.as_ref());
                 Ok(Some(log_index))
             },
@@ -71,11 +83,11 @@ impl LogReader for RocksdbLogStore {
     async fn get_log_entry(&self, log_index: usize) -> Result<Option<LogEntry>, AnyError> {
         let key = to_key(log_index);
         let value = self.rocksdb.get_pinned_cf(self.cf_log_entry(), key).map_err(|e| {
-            AnyError::from(e)
+            AnyError::from(&e)
         })?;
         match value {
             Some(encoded) => {
-                let decoded_entry = LogEntryCodec::decode(encoded)?;
+                let decoded_entry = Self::decode(encoded)?;
                 Ok(Some(decoded_entry))
             },
             None => Ok(None),// Not Found LogEntry
@@ -94,7 +106,7 @@ impl LogWriter for RocksdbLogStore {
             key,
             value
         ).map_err(|e| {
-            AnyError::from(e)
+            AnyError::from(&e)
         })?;
         Ok(())
     }
@@ -105,7 +117,7 @@ impl LogWriter for RocksdbLogStore {
 
         while let Some (kv) = iter.next(){
             let (key, _) = kv.map_err(|e| {
-                AnyError::from(e)
+                AnyError::from(&e)
             })?;
             let log_index = from_key(key.as_ref());
             if log_index < first_log_index_kept {
@@ -115,7 +127,7 @@ impl LogWriter for RocksdbLogStore {
             }
         }
         self.rocksdb.write(batch).map_err(|e| {
-            AnyError::from(e)
+            AnyError::from(&e)
         })?;
         Ok(Some(first_log_index_kept))
     }
@@ -125,7 +137,7 @@ impl LogWriter for RocksdbLogStore {
         let mut iter = self.rocksdb.iterator_cf(self.cf_log_entry(), IteratorMode::End);
         while let Some (kv) = iter.next(){
             let (key, _) = kv.map_err(|e| {
-                AnyError::from(e)
+                AnyError::from(&e)
             })?;
             let log_index = from_key(key.as_ref());
             if log_index > last_log_index_kept {
@@ -135,24 +147,22 @@ impl LogWriter for RocksdbLogStore {
             }
         }
         self.rocksdb.write(batch).map_err(|e| {
-            AnyError::from(e)
+            AnyError::from(&e)
         })?;
         Ok(Some(last_log_index_kept))
     }
 
-    async fn reset(&mut self, next_log_index: usize) -> Result<(), AnyError> {
+    async fn reset(&mut self, _next_log_index: usize) -> Result<(), AnyError> {
         let mut batch = WriteBatch::default();
         let min_key = to_key(usize::MIN);
         let max_key = to_key(usize::MAX);
         batch.delete_range_cf(self.cf_log_entry(), &min_key, &max_key);
         Ok(())
-
-
     }
 
     async fn flush(&mut self) -> Result<(), AnyError> {
         self.rocksdb.flush_wal(true).map_err(|e| {
-            AnyError::from(e)
+            AnyError::from(&e)
         })?;
         Ok(())
     }

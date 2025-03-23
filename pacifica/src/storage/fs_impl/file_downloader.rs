@@ -15,6 +15,7 @@ const DEF_MAX_LEN_PER_REQUEST: u64 = 4096;
 const DEF_RETRIES: usize = 3;
 const DEF_TIMEOUT: Duration = Duration::from_secs(60);
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FileDownloader<C, GFC>
 where
     C: TypeConfig,
@@ -26,11 +27,14 @@ where
     option: DownloadOption,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct DownloadOption {
     pub max_len_per_request: u64,
     pub timeout: Duration,
     pub retries: usize,
 }
+
+#[cfg(feature = "snapshot-storage-fs")]
 impl Default for DownloadOption {
     fn default() -> Self {
         DownloadOption {
@@ -41,6 +45,7 @@ impl Default for DownloadOption {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, GFC> FileDownloader<C, GFC>
 where
     C: TypeConfig,
@@ -112,7 +117,7 @@ where
     }
 }
 
-
+#[cfg(feature = "snapshot-storage-fs")]
 pub enum DownloadFileError {
     ClientError { source: RpcClientError },
 
@@ -121,6 +126,7 @@ pub enum DownloadFileError {
     WriteError { source: Error },
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl Debug for DownloadFileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -136,18 +142,18 @@ impl Debug for DownloadFileError {
         }
     }
 }
-
+#[cfg(feature = "snapshot-storage-fs")]
 impl Display for DownloadFileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
-
+#[cfg(feature = "snapshot-storage-fs")]
 impl StdError for DownloadFileError {
 
 
 }
-
+#[cfg(feature = "snapshot-storage-fs")]
 fn write_response(dest_file: &mut File, response: GetFileResponse) -> Result<(bool, u64), DownloadFileError> {
     match response {
         GetFileResponse::Success { data, eof } => {

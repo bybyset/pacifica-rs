@@ -6,8 +6,7 @@ edition = "2021"
 
 [dependencies]
 
-pacifica-rs = { path = "../../pacifica" }
-pacifica-rs-rocksdb-logstore = {path = "../../extension/rocksdb-logstore"}
+pacifica-rs = { path = "../../pacifica" , features = ["tokio-runtime"]}
 pacifica-rs-rpc-impl-grpc = {path = "../../extension/rpc-impl-grpc"}
 
 

@@ -4,3 +4,4 @@ mod replica_option;
 mod replica_option_test;
 
 pub use self::replica_option::ReplicaOption;
+pub use self::error::OptionError;

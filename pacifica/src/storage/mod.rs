@@ -7,9 +7,11 @@ mod log_reader;
 mod log_entry_codec;
 pub mod get_file_rpc;
 
-pub mod fs_impl {
-    #[cfg(feature = "snapshot-storage-fs")]
+#[cfg(feature = "log-storage-rocksdb")]
+pub mod rocksdb_impl;
 
+#[cfg(feature = "snapshot-storage-fs")]
+pub mod fs_impl {
     mod fs_snapshot_storage;
     mod file_service;
     mod file_downloader;
@@ -22,9 +24,9 @@ pub mod fs_impl {
     pub use file_downloader::FileDownloader;
     pub use file_downloader::DownloadOption;
     pub use file_downloader::DownloadFileError;
-
-
 }
+
+
 
 pub use self::log_storage::LogStorage;
 pub use self::log_writer::LogWriter;

@@ -15,11 +15,13 @@ use std::fmt::{Debug, Display, Formatter};
 use crate::storage::fs_impl::fs_snapshot_storage::{FsSnapshotReaderInner, META_FILE_NAME};
 use crate::util::AutoClose;
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub enum ReadFileError {
     NotFoundFile { filename: String },
     ReadError { source: Error },
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl ReadFileError {
     pub fn to_get_file_response(self) -> GetFileResponse {
         match self {
@@ -31,6 +33,7 @@ impl ReadFileError {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl Debug for ReadFileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -48,16 +51,19 @@ impl Debug for ReadFileError {
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl Display for ReadFileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl StdError for ReadFileError {
 
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FileReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -67,6 +73,7 @@ where
     fs_snapshot_reader: Arc<AutoClose<FsSnapshotReaderInner<C, T, GFC>>>,
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FileReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -113,6 +120,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 pub struct FileService<C, T, GFC>
 where
     C: TypeConfig,
@@ -122,6 +130,7 @@ where
     reader_id_allocator : AtomicUsize,
     reader_map: HashMap<usize, FileReader<C, T, GFC>>,
 }
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FileService<C, T, GFC>
 where
     C: TypeConfig,
@@ -148,6 +157,7 @@ where
     }
 }
 
+#[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> GetFileService<C> for FileService<C, T, GFC>
 where
     C: TypeConfig,

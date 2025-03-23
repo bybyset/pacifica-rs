@@ -377,6 +377,7 @@ checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
+ "libloading",
 ]
 
 [[package]]
@@ -827,6 +828,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18d287de67fe55fd7e1581fe933d965a5a9477b38e949cfa9f8574ef01506398"
 
 [[package]]
+name = "libloading"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
+dependencies = [
+ "cfg-if",
+ "windows-targets",
+]
+
+[[package]]
 name = "librocksdb-sys"
 version = "0.17.1+9.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -838,6 +849,7 @@ dependencies = [
  "libc",
  "libz-sys",
  "lz4-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -1000,6 +1012,7 @@ dependencies = [
  "futures",
  "log",
  "pacifica-rs-macros",
+ "rocksdb",
  "thiserror 2.0.3",
  "tokio",
  "tracing",
@@ -1018,16 +1031,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pacifica-rs-rocksdb-logstore"
-version = "1.0.0"
-dependencies = [
- "anyerror",
- "byteorder",
- "pacifica-rs",
- "rocksdb",
-]
-
-[[package]]
 name = "pacifica-rs-rpc-impl-grpc"
 version = "1.0.0"
 dependencies = [
@@ -1041,13 +1044,6 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tracing",
-]
-
-[[package]]
-name = "pacifica-rs-segment-logstore"
-version = "1.0.0"
-dependencies = [
- "pacifica-rs",
 ]
 
 [[package]]
@@ -2196,3 +2192,13 @@ name = "zeroize"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
+
+[[package]]
+name = "zstd-sys"
+version = "2.0.14+zstd.1.5.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fb060d4926e4ac3a3ad15d864e99ceb5f343c6b34f5bd6d81ae6ed417311be5"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
