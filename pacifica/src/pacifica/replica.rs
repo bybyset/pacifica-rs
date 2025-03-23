@@ -1,7 +1,9 @@
 use crate::core::operation::Operation;
-use crate::core::pacifica_core::ReplicaCore;
-use crate::core::replica_msg::ApiMsg;
-use crate::core::{Lifecycle, ReplicaComponent, TaskSender};
+use crate::core::ApiMsg;
+use crate::core::ReplicaCore;
+use crate::core::Lifecycle;
+use crate::core::ReplicaComponent;
+use crate::core::TaskSender;
 use crate::error::{LifeCycleError, PacificaError};
 use crate::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, GetFileRequest, GetFileResponse, InstallSnapshotRequest,
@@ -9,7 +11,7 @@ use crate::rpc::message::{
     TransferPrimaryResponse,
 };
 use crate::rpc::{ReplicaService, RpcServiceError};
-use crate::runtime::{OneshotSender, TypeConfigExt};
+use crate::runtime::TypeConfigExt;
 use crate::storage::GetFileService;
 use crate::type_config::alias::{LogStorageOf, MetaClientOf, NodeIdOf, ReplicaClientOf, SnapshotStorageOf};
 use crate::ReplicaId;
@@ -159,14 +161,6 @@ where
         Replica {
             inner: Arc::clone(&self.inner),
         }
-    }
-}
-
-pub struct ReplicaBuilder<C, FSM> {}
-
-impl<C, FSM> ReplicaBuilder<C, FSM> {
-    pub fn build(self) -> Result<Replica<C, FSM>, PacificaError<C>> {
-        todo!()
     }
 }
 

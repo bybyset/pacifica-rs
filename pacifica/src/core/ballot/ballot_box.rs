@@ -240,7 +240,7 @@ where
     }
 }
 
-struct WorkHandler<C, FSM>
+pub(crate) struct WorkHandler<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,

@@ -50,7 +50,7 @@ where
     }
 }
 
-struct FsSnapshotStorageInner<C, T, GFC>
+pub struct FsSnapshotStorageInner<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,

@@ -6,13 +6,12 @@ pub mod tests {
     use crate::pacifica::{Codec, DecodeError, EncodeError, Response};
     use crate::rpc::message::{AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse, ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse};
     use crate::rpc::{ConnectionClient, ReplicaClient, RpcOption};
-    use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotReader, SnapshotWriter};
+    use crate::storage::{GetFileRequest, GetFileResponse, GetFileService, SnapshotDownloader, SnapshotReader, SnapshotWriter};
     use crate::util::Closeable;
     use crate::{DefaultLogEntryCodec, LogEntry, LogId, LogReader, LogStorage, LogWriter, ReplicaGroup, ReplicaId, Request, SnapshotStorage, TypeConfig};
     use anyerror::AnyError;
     use bytes::Bytes;
-    use std::fmt::Display;
-    use std::hash::Hash;
+    use std::fmt::{Debug, Formatter};
 
 
     pub(crate) struct MockLogStorage;
@@ -22,19 +21,19 @@ pub mod tests {
     pub(crate) struct MockLogReader;
 
     impl LogWriter for MockLogWriter {
-        async fn append_entry(&mut self, entry: LogEntry) -> Result<(), AnyError> {
+        async fn append_entry(&mut self, _entry: LogEntry) -> Result<(), AnyError> {
             Ok(())
         }
 
-        async fn truncate_prefix(&mut self, first_log_index_kept: usize) -> Result<Option<usize>, AnyError> {
+        async fn truncate_prefix(&mut self, _first_log_index_kept: usize) -> Result<Option<usize>, AnyError> {
             Ok(None)
         }
 
-        async fn truncate_suffix(&mut self, last_log_index_kept: usize) -> Result<Option<usize>, AnyError> {
+        async fn truncate_suffix(&mut self, _last_log_index_kept: usize) -> Result<Option<usize>, AnyError> {
             Ok(None)
         }
 
-        async fn reset(&mut self, next_log_index: usize) -> Result<(), AnyError> {
+        async fn reset(&mut self, _next_log_index: usize) -> Result<(), AnyError> {
             Ok(())
         }
 
@@ -53,7 +52,7 @@ pub mod tests {
             Ok(Some(1))
         }
 
-        async fn get_log_entry(&self, log_index: usize) -> Result<Option<LogEntry>, AnyError> {
+        async fn get_log_entry(&self, _log_index: usize) -> Result<Option<LogEntry>, AnyError> {
             Ok(None)
         }
     }
@@ -76,7 +75,9 @@ pub mod tests {
 
     pub(crate) struct MockSnapshotWriter {}
     pub(crate) struct MockSnapshotReader {}
+    pub(crate) struct MockSnapshotDownloader {}
     pub(crate) struct MockSnapshotStorage {}
+
 
     impl Closeable for MockSnapshotReader {
         fn close(&mut self) -> Result<(), AnyError> {
@@ -106,6 +107,11 @@ pub mod tests {
         }
     }
 
+    impl SnapshotDownloader for MockSnapshotDownloader {
+        async fn download(&mut self) -> Result<(), AnyError> {
+            Ok(())
+        }
+    }
     impl<C> GetFileService<C> for MockSnapshotStorage
     where
         C: TypeConfig,
@@ -119,17 +125,18 @@ pub mod tests {
     where C: TypeConfig {
         type Reader = MockSnapshotReader;
         type Writer = MockSnapshotWriter;
+        type Downloader = MockSnapshotDownloader;
 
-        async fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
-            Ok(None)
+        fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
+            Ok(Some(MockSnapshotReader{}))
         }
 
-        async fn open_writer(&self) -> Result<Self::Writer, AnyError> {
+        fn open_writer(&mut self) -> Result<Self::Writer, AnyError> {
             Ok(MockSnapshotWriter{})
         }
 
-        async fn download_snapshot(&self, _target_id: ReplicaId<C::NodeId>, _reader_id: usize) -> Result<(), AnyError> {
-            Ok(())
+        fn open_downloader(&mut self, _target_id: ReplicaId<C::NodeId>, _reader_id: usize) -> Result<Self::Downloader, AnyError> {
+            Ok(MockSnapshotDownloader{})
         }
     }
 
@@ -137,19 +144,19 @@ pub mod tests {
     pub(crate) struct MockMetaClient;
 
     impl<C: TypeConfig> MetaClient<C> for MockMetaClient {
-        async fn get_replica_group(&self, group_name: impl AsRef<str>) -> Result<ReplicaGroup<C>, MetaError> {
+        async fn get_replica_group(&self, _group_name: &str) -> Result<ReplicaGroup<C>, MetaError> {
             Err(MetaError::Timeout)
         }
 
-        async fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
+        async fn add_secondary(&self, _replica_id: ReplicaId<C::NodeId>, _version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
 
-        async fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
+        async fn remove_secondary(&self, _replica_id: ReplicaId<C::NodeId>, _version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
 
-        async fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> Result<(), MetaError> {
+        async fn change_primary(&self, _replica_id: ReplicaId<C::NodeId>, _version: usize) -> Result<(), MetaError> {
             Err(MetaError::Timeout)
         }
     }
@@ -160,25 +167,25 @@ pub mod tests {
     impl<C: TypeConfig> ConnectionClient<C> for MockPacificaClient {}
 
     impl<C: TypeConfig> ReplicaClient<C> for MockPacificaClient {
-        async fn append_entries(&self, target: ReplicaId<C::NodeId>, request: AppendEntriesRequest<C>, rpc_option: RpcOption) -> Result<AppendEntriesResponse, RpcClientError> {
+        async fn append_entries(&self, _target: ReplicaId<C::NodeId>, _request: AppendEntriesRequest<C>, _rpc_option: RpcOption) -> Result<AppendEntriesResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn install_snapshot(&self, target_id: ReplicaId<C::NodeId>, request: InstallSnapshotRequest<C>, rpc_option: RpcOption) -> Result<InstallSnapshotResponse, RpcClientError> {
+        async fn install_snapshot(&self, _target_id: ReplicaId<C::NodeId>, _request: InstallSnapshotRequest<C>, _rpc_option: RpcOption) -> Result<InstallSnapshotResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn replica_recover(&self, primary_id: ReplicaId<C::NodeId>, request: ReplicaRecoverRequest<C>, rpc_option: RpcOption) -> Result<ReplicaRecoverResponse, RpcClientError> {
+        async fn replica_recover(&self, _primary_id: ReplicaId<C::NodeId>, _request: ReplicaRecoverRequest<C>, _rpc_option: RpcOption) -> Result<ReplicaRecoverResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
         }
 
-        async fn transfer_primary(&self, secondary_id: ReplicaId<C::NodeId>, request: TransferPrimaryRequest<C>, rpc_option: RpcOption) -> Result<TransferPrimaryResponse, RpcClientError> {
+        async fn transfer_primary(&self, _secondary_id: ReplicaId<C::NodeId>, _request: TransferPrimaryRequest<C>, _rpc_option: RpcOption) -> Result<TransferPrimaryResponse, RpcClientError> {
             Err(
                 RpcClientError::Timeout
             )
@@ -189,8 +196,20 @@ pub mod tests {
 
     pub(crate) struct MockResponse;
 
+    impl Debug for MockRequest {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Test Request")
+        }
+    }
+
     impl Request for MockRequest {
 
+    }
+
+    impl Debug for MockResponse {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            write!(f, "Test Response")
+        }
     }
 
     impl Response for MockResponse {
@@ -200,11 +219,11 @@ pub mod tests {
     pub(crate) struct MockRequestCodec;
 
     impl Codec<MockRequest> for MockRequestCodec {
-        fn encode(entry: &MockRequest) -> Result<Bytes, EncodeError<MockRequest>> {
+        fn encode(_entry: &MockRequest) -> Result<Bytes, EncodeError<MockRequest>> {
             Ok(Bytes::new())
         }
 
-        fn decode(bytes: Bytes) -> Result<MockRequest, DecodeError> {
+        fn decode(_bytes: Bytes) -> Result<MockRequest, DecodeError> {
             Ok(MockRequest)
         }
     }

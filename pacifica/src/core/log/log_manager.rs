@@ -288,7 +288,7 @@ where C: TypeConfig{
     }
 }
 
-struct WorkHandler<C>
+pub(crate) struct WorkHandler<C>
 where C: TypeConfig{
     log_storage: Arc<C::LogStorage>,
     first_log_index: Arc<AtomicUsize>,

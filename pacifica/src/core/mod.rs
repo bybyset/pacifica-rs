@@ -28,5 +28,8 @@ pub(crate) use self::core_notification::CoreNotification;
 
 pub(crate) use self::caught_up::CaughtUpError;
 
+pub(crate) use self::pacifica_core::ReplicaCore;
+pub(crate) use self::replica_msg::ApiMsg;
+
 
 

@@ -1,11 +1,13 @@
 use crate::{Replica, ReplicaId, StateMachine, TypeConfig};
 use std::collections::HashMap;
 
-pub trait ReplicaRouter {
-    fn replica<C, FSM>(&self, replica_id: &ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>
-    where
-        C: TypeConfig,
-        FSM: StateMachine<C>;
+pub trait ReplicaRouter<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>
+{
+    fn replica(&self, replica_id: &ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>;
+
 }
 
 pub struct ReplicaManager<C, FSM>
@@ -27,7 +29,11 @@ where
         }
     }
 
-    pub fn register_replica(&mut self, replica_id: ReplicaId<C::NodeId>, replica: Replica<C, FSM>) -> Option<Replica<C, FSM>> {
+    pub fn register_replica(
+        &mut self,
+        replica_id: ReplicaId<C::NodeId>,
+        replica: Replica<C, FSM>,
+    ) -> Option<Replica<C, FSM>> {
         self.replica_container.insert(replica_id, replica)
     }
 
@@ -36,8 +42,12 @@ where
     }
 }
 
-impl<C, FSM> ReplicaRouter for ReplicaManager<C, FSM> {
-    fn replica<C, FSM>(&self, replica_id: ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>
+impl<C, FSM> ReplicaRouter<C, FSM> for ReplicaManager<C, FSM>
+where
+    C: TypeConfig,
+    FSM: StateMachine<C>,
+{
+    fn replica(&self, replica_id: &ReplicaId<C::NodeId>) -> Option<Replica<C, FSM>>
     where
         C: TypeConfig,
         FSM: StateMachine<C>,

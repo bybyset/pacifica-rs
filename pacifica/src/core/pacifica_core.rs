@@ -24,7 +24,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use anyerror::AnyError;
 
-pub struct ReplicaCore<C, FSM>
+pub(crate) struct ReplicaCore<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,
@@ -113,6 +113,11 @@ where
             work_handler: Mutex::new(Some(work_handler)),
         }
     }
+
+    pub(crate) fn get_replica_state(&self) -> ReplicaState {
+        let core_state = self.core_state.read().unwrap();
+        core_state.get_replica_state()
+    }
 }
 
 impl<C, FSM> Lifecycle<C> for ReplicaCore<C, FSM>
@@ -146,7 +151,7 @@ where
     }
 }
 
-struct WorkHandler<C, FSM>
+pub(crate) struct WorkHandler<C, FSM>
 where
     C: TypeConfig,
     FSM: StateMachine<C>,

@@ -155,7 +155,7 @@ where
     }
 }
 
-struct WorkHandler<C>
+pub(crate) struct WorkHandler<C>
 where
     C: TypeConfig,
 {

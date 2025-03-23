@@ -10,7 +10,7 @@ where C: TypeConfig {
 
     /// get replica group by group name
     ///
-    fn get_replica_group(&self, group_name: impl AsRef<str>) -> impl Future<Output = Result<ReplicaGroup<C>, MetaError>> + Send;
+    fn get_replica_group(&self, group_name: &str) -> impl Future<Output = Result<ReplicaGroup<C>, MetaError>> + Send;
 
     ///
     fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;

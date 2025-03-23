@@ -17,7 +17,6 @@ mod str_node_id;
 pub use crate::pacifica::Replica;
 pub use crate::pacifica::ReplicaRouter;
 pub use crate::pacifica::ReplicaManager;
-pub use crate::pacifica::ReplicaBuilder;
 
 
 pub use crate::model::LogId;
@@ -59,6 +58,7 @@ pub use crate::runtime::AsyncRuntime;
 
 
 pub use crate::pacifica::Request;
+pub use crate::pacifica::Response;
 
 
 

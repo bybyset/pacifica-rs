@@ -1,11 +1,11 @@
+use std::fmt::Debug;
+
 mod codec;
 mod declare_pacifica_types;
 mod replica;
 mod router;
 
 pub use self::replica::Replica;
-pub use self::replica::ReplicaBuilder;
-use std::fmt::Debug;
 
 pub use self::declare_pacifica_types::*;
 
