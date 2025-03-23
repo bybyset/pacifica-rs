@@ -1,5 +1,6 @@
 mod counter_fsm;
 mod requests;
+mod meta;
 
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -13,6 +14,8 @@ declare_pacifica_types! {
         Request = CounterRequest,
         Response = CounterResponse,
         RequestCodec = CounterCodec,
+        MetaClient = CounterMetaClient<Self>,
+        ReplicaClient = GrpcReplicaClient<Self>,
 
 }
 

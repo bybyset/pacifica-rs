@@ -1,6 +1,4 @@
-use pacifica_rs::NodeId;
 use std::collections::HashMap;
-use std::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 pub struct Node {
@@ -8,7 +6,7 @@ pub struct Node {
 }
 
 pub trait Router<NodeId> {
-    fn node(&self, node_id: NodeId) -> Option<Node>;
+    fn node(&self, node_id: &NodeId) -> Option<&Node>;
 }
 
 pub struct DefaultRouter<NodeId> {
@@ -29,14 +27,15 @@ impl<NodeId> DefaultRouter<NodeId> {
 }
 
 impl<NodeId> Router<NodeId> for DefaultRouter<NodeId> {
-    fn node(&self, node_id: NodeId) -> Option<Node> {
+    fn node(&self, node_id: &NodeId) -> Option<&Node> {
         let nodes = self.node_container.read().unwrap();
         let node = nodes.get(&node_id);
+        node
     }
 }
 
 impl<T, NodeId> Router<NodeId> for Arc<T> {
-    fn node(&self, node_id: NodeId) -> Option<Node> {
+    fn node(&self, node_id: &NodeId) -> Option<&Node> {
         *self.node(node_id)
     }
 }

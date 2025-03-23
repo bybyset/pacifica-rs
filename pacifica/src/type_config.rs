@@ -54,10 +54,10 @@ pub trait TypeConfig: Sized + Send + Sync + Debug + Clone + Copy + Default +  Eq
     type Response: Response;
     type RequestCodec: Codec<Self::Request>;
     type MetaClient: MetaClient<Self>;
+    type ReplicaClient: ReplicaClient<Self>;
 
     type NodeId: NodeId;
     type AsyncRuntime: AsyncRuntime;
-    type ReplicaClient: ReplicaClient<Self>;
     type LogStorage: LogStorage;
     type SnapshotStorage: SnapshotStorage<Self>;
 }

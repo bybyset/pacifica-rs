@@ -84,9 +84,9 @@ where
     C: TypeConfig,
     R: Router<C::NodeId>,
 {
-    async fn connect(&self, _replica_id: &ReplicaId<C>) -> Result<(), ConnectError<C>> {
-        let node_id = _replica_id.node_id();
-        let node = self.router.node(node_id);
+    async fn connect(&self, replica_id: &ReplicaId<C::NodeId>) -> Result<(), ConnectError<C>> {
+        let node_id = replica_id.node_id();
+        let node = self.router.node(&node_id);
         match node {
             Some(node) => {
                 let client = GrpcClient::new(node.addr).await.map_err(|e| ConnectError::Undefined {
@@ -101,7 +101,7 @@ where
         }
     }
 
-    async fn disconnect(&self, replica_id: &ReplicaId<C>) -> bool {
+    async fn disconnect(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         if self.is_connected(replica_id) {
             let mut conn_map = self.conn_map.write().unwrap();
             let removed = conn_map.remove(replica_id.node_id());
@@ -110,7 +110,7 @@ where
         false
     }
 
-    async fn is_connected(&self, replica_id: &ReplicaId<C>) -> bool {
+    async fn is_connected(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         let node_id = replica_id.node_id();
         let conn_map = self.conn_map.read().unwrap();
         conn_map.contains_key(node_id)
@@ -124,7 +124,7 @@ where
 {
     async fn append_entries(
         &self,
-        target: ReplicaId<C>,
+        target: ReplicaId<C::NodeId>,
         request: AppendEntriesRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<AppendEntriesResponse, RpcClientError> {
@@ -148,7 +148,7 @@ where
 
     async fn install_snapshot(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         request: InstallSnapshotRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<InstallSnapshotResponse, RpcClientError> {
@@ -172,7 +172,7 @@ where
 
     async fn replica_recover(
         &self,
-        primary_id: ReplicaId<C>,
+        primary_id: ReplicaId<C::NodeId>,
         request: ReplicaRecoverRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<ReplicaRecoverResponse, RpcClientError> {
@@ -196,7 +196,7 @@ where
 
     async fn transfer_primary(
         &self,
-        secondary_id: ReplicaId<C>,
+        secondary_id: ReplicaId<C::NodeId>,
         request: TransferPrimaryRequest<C>,
         rpc_option: RpcOption,
     ) -> Result<TransferPrimaryResponse, RpcClientError> {
@@ -226,7 +226,7 @@ where
 {
     async fn get_file(
         &self,
-        target_id: ReplicaId<C>,
+        target_id: ReplicaId<C::NodeId>,
         request: GetFileRequest,
         rpc_option: RpcOption,
     ) -> Result<GetFileResponse, RpcClientError> {
@@ -249,7 +249,7 @@ where
     }
 }
 
-fn to_replica_id_proto<C: TypeConfig>(replica_id: &ReplicaId<C>) -> ReplicaIdProto {
+fn to_replica_id_proto<C: TypeConfig>(replica_id: &ReplicaId<C::NodeId>) -> ReplicaIdProto {
     ReplicaIdProto::from(replica_id)
 }
 
@@ -261,7 +261,7 @@ fn to_log_id_proto(log_id: &LogId) -> LogIdProto {
 }
 
 fn to_append_entries_req<C: TypeConfig>(
-    target_id: &ReplicaId<C>,
+    target_id: &ReplicaId<C::NodeId>,
     request: AppendEntriesRequest<C>,
 ) -> AppendEntriesReq {
     let target_id = to_replica_id_proto(&target_id);
@@ -280,7 +280,7 @@ fn to_append_entries_req<C: TypeConfig>(
 }
 
 fn to_install_snapshot_req<C: TypeConfig>(
-    target_id: &ReplicaId<C>,
+    target_id: &ReplicaId<C::NodeId>,
     request: InstallSnapshotRequest<C>,
 ) -> InstallSnapshotReq {
     let target_id = to_replica_id_proto(&target_id);
@@ -297,7 +297,7 @@ fn to_install_snapshot_req<C: TypeConfig>(
 }
 
 fn to_replica_recover_req<C: TypeConfig>(
-    target_id: &ReplicaId<C>,
+    target_id: &ReplicaId<C::NodeId>,
     request: ReplicaRecoverRequest<C>,
 ) -> ReplicaRecoverReq {
     let target_id = to_replica_id_proto(&target_id);
@@ -311,7 +311,7 @@ fn to_replica_recover_req<C: TypeConfig>(
 }
 
 fn to_transfer_primary_req<C: TypeConfig>(
-    target_id: &ReplicaId<C>,
+    target_id: &ReplicaId<C::NodeId>,
     request: TransferPrimaryRequest<C>,
 ) -> TransferPrimaryReq {
     let target_id = to_replica_id_proto(&target_id);
@@ -324,7 +324,7 @@ fn to_transfer_primary_req<C: TypeConfig>(
     }
 }
 
-fn to_get_file_req<C: TypeConfig>(target_id: &ReplicaId<C>, request: GetFileRequest) -> GetFileReq {
+fn to_get_file_req<C: TypeConfig>(target_id: &ReplicaId<C::NodeId>, request: GetFileRequest) -> GetFileReq {
     let target_id = to_replica_id_proto(&target_id);
     GetFileReq {
         target_id: Some(target_id),

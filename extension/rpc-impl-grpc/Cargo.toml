@@ -12,14 +12,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-pacifica-rs = {path = "../../pacifica"}
+pacifica-rs = {path = "../../pacifica", features = ["tokio-runtime"]}
 tonic = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
-prost-derive = { workspace = true, optional = true }
-thiserror = { workspace = true }
+bytes = {workspace = true}
 anyerror = { workspace = true }
 tracing = { workspace = true }
-bytes = "1.9.0"
 
 [dev-dependencies]
 prost-build = { workspace = true}

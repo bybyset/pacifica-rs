@@ -17,5 +17,4 @@ pub use self::codec::Codec;
 pub use self::codec::DecodeError;
 pub use self::codec::EncodeError;
 
-pub use self::router::ReplicaManager;
 pub use self::router::ReplicaRouter;

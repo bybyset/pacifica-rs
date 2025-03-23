@@ -25,12 +25,10 @@ macro_rules! declare_pacifica_types {
                 $(($type_id, $(#[$inner])*, $type),)*
 
                 Default types:
-                (NodeId       , , $crate::StrNodeId                                   ),
-                (AsyncRuntime         , , $crate::TokioRuntime              ),
-                (ReplicaClient        , , $crate::impls::Entry<Self>            ),
-                (LogStorage , , std::io::Cursor<Vec<u8>>                       ),
-                (SnapshotStorage    , , $crate::impls::OneshotResponder<Self> ),
-                (AsyncRuntime , , $crate::impls::TokioRuntime           ),
+                (NodeId          , , $crate::StrNodeId                                   ),
+                (AsyncRuntime    , , $crate::TokioRuntime              ),
+                (LogStorage      , , $crate::storage::rocksdb_impl::RocksdbLogStore                  ),
+                (SnapshotStorage , , $crate::storage::fs_impl::FsSnapshotStore ),
             );
 
         }

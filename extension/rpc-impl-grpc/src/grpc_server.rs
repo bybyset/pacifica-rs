@@ -12,7 +12,7 @@ use pacifica_rs::rpc::message::{
 };
 use pacifica_rs::rpc::ReplicaService;
 use pacifica_rs::storage::{GetFileRequest, GetFileResponse, GetFileService};
-use pacifica_rs::{Replica, ReplicaId, ReplicaRouter, StateMachine, TypeConfig};
+use pacifica_rs::{Replica, ReplicaId, ReplicaRouter, TypeConfig};
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -23,6 +23,7 @@ use tonic::server::NamedService;
 use tonic::transport::server::Router;
 use tonic::transport::{Error, Server};
 use tonic::{Request, Response, Status};
+use pacifica_rs::fsm::StateMachine;
 
 pub mod grpc {
     tonic::include_proto!("pacifica");

@@ -16,8 +16,6 @@ mod core;
 
 pub use crate::pacifica::Replica;
 pub use crate::pacifica::ReplicaRouter;
-pub use crate::pacifica::ReplicaManager;
-
 
 pub use crate::model::LogId;
 pub use crate::model::LogEntry;

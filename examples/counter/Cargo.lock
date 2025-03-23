@@ -796,7 +796,6 @@ dependencies = [
  "anyerror",
  "bytes",
  "pacifica-rs",
- "thiserror 2.0.3",
  "tonic-build",
  "tracing",
 ]

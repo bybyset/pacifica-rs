@@ -11,56 +11,40 @@ use pacifica_rs::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use pacifica_rs::rpc::{ReplicaClient, RpcServiceError};
+use pacifica_rs::rpc::{RpcServiceError};
 use pacifica_rs::storage::{GetFileRequest, GetFileResponse};
-use pacifica_rs::{LogEntry, LogId, ReplicaId, TypeConfig};
+use pacifica_rs::{LogEntry, LogId, NodeId, ReplicaId, TypeConfig};
 
 mod grpc_client;
 mod grpc_server;
 mod pacifica;
 mod response_error;
 mod router;
+mod tests;
 
 pub type RpcResult<T, E = RpcServiceError> = Result<T, E>;
 
-impl<C> From<ReplicaId<C>> for ReplicaIdProto
+impl<N> From<ReplicaId<N>> for ReplicaIdProto
 where
-    C: TypeConfig,
+    N: NodeId,
 {
-    fn from(value: ReplicaId<C>) -> Self {
+    fn from(value: ReplicaId<N>) -> Self {
         let group_name = value.group_name();
         let node_id = value.node_id().into();
         ReplicaIdProto { group_name, node_id }
     }
 }
 
-impl<C> Into<ReplicaId<C::NodeId>> for ReplicaIdProto
-where
-    C: TypeConfig,
-{
-    fn into(self) -> ReplicaId<C> {
-        ReplicaId::<C::NodeId>::from(self)
-    }
-}
 
-impl<C> From<ReplicaIdProto> for ReplicaId<C::NodeId>
+impl<N> From<ReplicaIdProto> for ReplicaId<N>
 where
-    C: TypeConfig,
+    N: NodeId,
 {
     fn from(value: ReplicaIdProto) -> Self {
         let group_name = value.group_name;
         let node_id = value.node_id;
-        let node_id = C::NodeId::from(node_id);
+        let node_id = N::from(node_id);
         ReplicaId::new(group_name, node_id)
-    }
-}
-
-impl<C> Into<ReplicaIdProto> for ReplicaId<C::NodeId>
-where
-    C: TypeConfig,
-{
-    fn into(self) -> ReplicaIdProto {
-        ReplicaIdProto::from(self)
     }
 }
 
@@ -343,15 +327,6 @@ where
         RpcResponse {
             error: Some(response_error),
             response: None,
-        }
-    }
-}
-
-impl From<AppendEntriesRep> for RpcResponse {
-    fn from(value: AppendEntriesRep) -> Self {
-        RpcResponse {
-            error: None,
-            response: Some(Response::AppendEntriesRep(value)),
         }
     }
 }

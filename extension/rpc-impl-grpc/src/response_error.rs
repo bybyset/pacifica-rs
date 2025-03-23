@@ -1,5 +1,5 @@
 use crate::pacifica::{
-    AppendEntriesRep, GetFileRep, InstallSnapshotRep, ReplicaRecoverRep, ResponseError, TransferPrimaryRep,
+    AppendEntriesRep, InstallSnapshotRep, ReplicaRecoverRep, ResponseError, TransferPrimaryRep,
 };
 
 pub const CODE_SUCCESS: i32 = 0;
