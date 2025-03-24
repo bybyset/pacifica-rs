@@ -1,7 +1,6 @@
 mod log_storage;
 pub mod error;
 mod snapshot_storage;
-mod snapshot_meta;
 mod log_writer;
 mod log_reader;
 mod log_entry_codec;
@@ -21,6 +20,11 @@ pub mod fs_impl {
     pub use self::fs_snapshot_storage::FsSnapshotWriter;
     pub use self::fs_snapshot_storage::FileMeta;
 
+    pub use self::file_service::GetFileHandler;
+    pub use self::file_service::FileService;
+    pub use self::file_service::FileReader;
+    pub use self::file_service::ReadFileError;
+
     pub use file_downloader::FileDownloader;
     pub use file_downloader::DownloadOption;
     pub use file_downloader::DownloadFileError;
@@ -38,7 +42,6 @@ pub use self::snapshot_storage::SnapshotStorage;
 pub use self::snapshot_storage::SnapshotReader;
 pub use self::snapshot_storage::SnapshotWriter;
 pub use self::snapshot_storage::SnapshotDownloader;
-pub use self::snapshot_meta::SnapshotMeta;
 
 
 pub use self::error::StorageError;

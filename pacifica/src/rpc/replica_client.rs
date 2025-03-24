@@ -13,35 +13,43 @@ use crate::rpc::RpcClientError;
 use crate::rpc::RpcOption;
 use crate::{ReplicaId, TypeConfig};
 
-pub trait ConnectionClient<C>
+pub trait ConnectionClient<C>: Send + Sync
 where
     C: TypeConfig,
 {
-    async fn connect(&self, _replica_id: &ReplicaId<C::NodeId>) -> Result<(), ConnectError<C>> {
-        Ok(())
+    fn connect(&self, _replica_id: &ReplicaId<C::NodeId>) -> impl Future<Output = Result<(), ConnectError<C>>> + Send {
+        async {
+            Ok(())
+        }
     }
 
-    async fn disconnect(&self, _replica_id: &ReplicaId<C::NodeId>) -> bool {
-        true
+    fn disconnect(&self, _replica_id: &ReplicaId<C::NodeId>) -> impl Future<Output = bool> + Send {
+        async {
+            true
+        }
     }
 
-    async fn check_connected(
+    fn check_connected(
         &self,
         replica_id: &ReplicaId<C::NodeId>,
         create_if_absent: bool,
-    ) -> Result<bool, ConnectError<C>> {
-        if !self.is_connected(replica_id).await {
-            if create_if_absent {
-                self.connect(replica_id).await?;
-                return Ok(true);
+    ) -> impl Future<Output = Result<bool, ConnectError<C>>> + Send {
+        async move {
+            if !self.is_connected(replica_id).await {
+                if create_if_absent {
+                    self.connect(replica_id).await?;
+                    return Ok(true);
+                }
+                return Ok(false);
             }
-            return Ok(false);
+            Ok(true)
         }
-        Ok(true)
     }
 
-    async fn is_connected(&self, _replica_id: &ReplicaId<C::NodeId>) -> bool {
-        true
+    fn is_connected(&self, _replica_id: &ReplicaId<C::NodeId>) -> impl Future<Output = bool> + Send  {
+        async {
+            true
+        }
     }
 }
 

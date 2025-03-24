@@ -36,11 +36,12 @@ pub trait SnapshotDownloader: Send + Sync + 'static {
 
 }
 
-pub trait SnapshotStorage<C>: GetFileService<C> + Send + Sync + 'static
+pub trait SnapshotStorage<C>: Send + Sync + 'static
 where C: TypeConfig {
     type Reader: SnapshotReader;
     type Writer: SnapshotWriter;
     type Downloader: SnapshotDownloader;
+    type FileService: GetFileService<C>;
 
     /// open snapshot reader for load snapshot image.
     /// return None if noting
@@ -53,4 +54,8 @@ where C: TypeConfig {
 
     /// download snapshot from remote target_id replica
     fn open_downloader(&mut self, target_id: ReplicaId<C::NodeId>, reader_id: usize) -> Result<Self::Downloader, AnyError>;
+
+    /// get file service
+    fn file_service(&self) -> Result<Self::FileService, AnyError>;
+
 }

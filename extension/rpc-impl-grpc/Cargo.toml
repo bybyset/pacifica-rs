@@ -13,8 +13,9 @@ repository.workspace = true
 
 [dependencies]
 pacifica-rs = {path = "../../pacifica", features = ["tokio-runtime"]}
-tonic = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
+tonic = { workspace = true}
+tonic-types = "0.12.3"
+prost = { workspace = true}
 bytes = {workspace = true}
 anyerror = { workspace = true }
 tracing = { workspace = true }
@@ -25,4 +26,4 @@ tonic-build = { workspace = true}
 
 
 [build-dependencies]
-tonic-build = { workspace = true}
+tonic-build = { workspace = true, features = ["prost"]}

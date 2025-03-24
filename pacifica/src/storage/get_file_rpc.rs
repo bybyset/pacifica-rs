@@ -63,12 +63,12 @@ where
     ) -> impl std::future::Future<Output = Result<GetFileResponse, RpcClientError>> + Send;
 }
 
-pub trait GetFileService<C>
+pub trait GetFileService<C>: Send
 where
     C: TypeConfig,
 {
     /// In general: Primary accepts the request and processes it.
     /// for download snapshot file
     ///
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError>;
+    fn handle_get_file_request(&self, request: GetFileRequest) -> impl std::future::Future<Output = Result<GetFileResponse, RpcServiceError>> + Send;
 }

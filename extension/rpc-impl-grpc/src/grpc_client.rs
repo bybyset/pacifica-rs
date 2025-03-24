@@ -13,10 +13,9 @@ use pacifica_rs::rpc::message::{
 };
 use pacifica_rs::rpc::{ConnectionClient, ReplicaClient, RpcOption};
 use pacifica_rs::storage::{GetFileClient, GetFileRequest, GetFileResponse};
-use pacifica_rs::{LogId, NodeId, ReplicaId, TypeConfig};
+use pacifica_rs::{LogId, ReplicaId, TypeConfig};
 use std::collections::HashMap;
-use std::error::Error;
-use std::sync::{Arc, RwLock};
+use std::sync::{RwLock};
 use std::time::Duration;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Request, Status};
@@ -26,13 +25,9 @@ const DEF_MAX_DECODING_MESSAGE_SIZE: usize = 64 * 1024 * 1024;
 
 const DEF_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub mod grpc {
-    tonic::include_proto!("pacifica");
-}
-
 #[derive(Clone)]
 pub struct GrpcClient {
-    client: Arc<PacificaGRpcClient<Channel>>,
+    client: PacificaGRpcClient<Channel>,
 }
 
 impl GrpcClient {
@@ -44,7 +39,7 @@ impl GrpcClient {
         client = client.max_encoding_message_size(DEF_MAX_ENCODING_MESSAGE_SIZE);
         client = client.max_decoding_message_size(DEF_MAX_DECODING_MESSAGE_SIZE);
         let inner_client = GrpcClient {
-            client: Arc::new(client),
+            client,
         };
         Ok(inner_client)
     }
@@ -73,8 +68,8 @@ where
 
     fn get_client(&self, node_id: C::NodeId) -> Result<GrpcClient, ConnectError<C>> {
         let conn_map = self.conn_map.read().unwrap();
-        let client: Option<GrpcClient> = conn_map.get(node_id).and_then(|c| c.cloned());
-
+        let client = conn_map.get(&node_id);
+        let client = client.and_then(|c| Some(Clone::clone(c)));
         client.ok_or_else(|| ConnectError::DisConnected)
     }
 }
@@ -89,7 +84,9 @@ where
         let node = self.router.node(&node_id);
         match node {
             Some(node) => {
-                let client = GrpcClient::new(node.addr).await.map_err(|e| ConnectError::Undefined {
+                let addr = node.addr.clone();
+                let addr = addr.to_string();
+                let client = GrpcClient::new(addr).await.map_err(|e| ConnectError::Undefined {
                     source: AnyError::new(&e),
                 })?;
 
@@ -102,9 +99,9 @@ where
     }
 
     async fn disconnect(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
-        if self.is_connected(replica_id) {
+        if self.is_connected(replica_id).await {
             let mut conn_map = self.conn_map.write().unwrap();
-            let removed = conn_map.remove(replica_id.node_id());
+            let removed = conn_map.remove(&replica_id.node_id());
             return removed.is_some();
         }
         false
@@ -113,7 +110,7 @@ where
     async fn is_connected(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         let node_id = replica_id.node_id();
         let conn_map = self.conn_map.read().unwrap();
-        conn_map.contains_key(node_id)
+        conn_map.contains_key(&node_id)
     }
 }
 
@@ -233,7 +230,7 @@ where
         let mut client = self.get_client(target_id.node_id()).map_err(|e| RpcClientError::NetworkError {
             source: AnyError::error(&e).add_context(|| " Get GrpcClient"),
         })?;
-        let req = to_get_file_req(&target_id, request);
+        let req = to_get_file_req::<C>(&target_id, request);
         let mut req = Request::new(req);
         req.set_timeout(rpc_option.timeout);
         let rep = client.client.get_file(req).await;
@@ -250,7 +247,12 @@ where
 }
 
 fn to_replica_id_proto<C: TypeConfig>(replica_id: &ReplicaId<C::NodeId>) -> ReplicaIdProto {
-    ReplicaIdProto::from(replica_id)
+    let group_name = replica_id.group_name();
+    let node_id = replica_id.node_id().into();
+    ReplicaIdProto {
+        group_name,
+        node_id
+    }
 }
 
 fn to_log_id_proto(log_id: &LogId) -> LogIdProto {
@@ -264,8 +266,8 @@ fn to_append_entries_req<C: TypeConfig>(
     target_id: &ReplicaId<C::NodeId>,
     request: AppendEntriesRequest<C>,
 ) -> AppendEntriesReq {
-    let target_id = to_replica_id_proto(&target_id);
-    let primary = to_replica_id_proto(&request.primary_id);
+    let target_id = to_replica_id_proto::<C>(&target_id);
+    let primary = to_replica_id_proto::<C>(&request.primary_id);
     let prev_log = to_log_id_proto(&request.prev_log_id);
     let entries = request.entries.into_iter().map(|entry| LogEntryProto::from(entry)).collect::<Vec<LogEntryProto>>();
     AppendEntriesReq {
@@ -283,8 +285,8 @@ fn to_install_snapshot_req<C: TypeConfig>(
     target_id: &ReplicaId<C::NodeId>,
     request: InstallSnapshotRequest<C>,
 ) -> InstallSnapshotReq {
-    let target_id = to_replica_id_proto(&target_id);
-    let primary = to_replica_id_proto(&request.primary_id);
+    let target_id = to_replica_id_proto::<C>(&target_id);
+    let primary = to_replica_id_proto::<C>(&request.primary_id);
     let snapshot_log_id = to_log_id_proto(&request.snapshot_log_id);
     InstallSnapshotReq {
         target_id: Some(target_id),
@@ -300,8 +302,8 @@ fn to_replica_recover_req<C: TypeConfig>(
     target_id: &ReplicaId<C::NodeId>,
     request: ReplicaRecoverRequest<C>,
 ) -> ReplicaRecoverReq {
-    let target_id = to_replica_id_proto(&target_id);
-    let recover_id = to_replica_id_proto(&request.recover_id);
+    let target_id = to_replica_id_proto::<C>(&target_id);
+    let recover_id = to_replica_id_proto::<C>(&request.recover_id);
     ReplicaRecoverReq {
         target_id: Some(target_id),
         recover_id: Some(recover_id),
@@ -314,8 +316,8 @@ fn to_transfer_primary_req<C: TypeConfig>(
     target_id: &ReplicaId<C::NodeId>,
     request: TransferPrimaryRequest<C>,
 ) -> TransferPrimaryReq {
-    let target_id = to_replica_id_proto(&target_id);
-    let new_primary = to_replica_id_proto(&request.new_primary_id);
+    let target_id = to_replica_id_proto::<C>(&target_id);
+    let new_primary = to_replica_id_proto::<C>(&request.new_primary_id);
     TransferPrimaryReq {
         target_id: Some(target_id),
         new_primary: Some(new_primary),
@@ -325,7 +327,7 @@ fn to_transfer_primary_req<C: TypeConfig>(
 }
 
 fn to_get_file_req<C: TypeConfig>(target_id: &ReplicaId<C::NodeId>, request: GetFileRequest) -> GetFileReq {
-    let target_id = to_replica_id_proto(&target_id);
+    let target_id = to_replica_id_proto::<C>(&target_id);
     GetFileReq {
         target_id: Some(target_id),
         reader_id: request.reader_id as u64,

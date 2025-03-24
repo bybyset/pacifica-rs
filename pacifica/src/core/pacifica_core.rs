@@ -454,21 +454,30 @@ where
         &self,
         request: AppendEntriesRequest<C>,
     ) -> Result<AppendEntriesResponse, RpcServiceError> {
-        self.core_state.read().unwrap().handle_append_entries_request(request).await.map_err(|e| RpcServiceError::from(e))
+        let core_state = {
+            self.core_state.read().unwrap().clone()
+        };
+        core_state.handle_append_entries_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_transfer_primary_request(
         &self,
         request: TransferPrimaryRequest<C>,
     ) -> Result<TransferPrimaryResponse, RpcServiceError> {
-        self.core_state.read().unwrap().handle_transfer_primary_request(request).await.map_err(|e| RpcServiceError::from(e))
+        let core_state = {
+            self.core_state.read().unwrap().clone()
+        };
+        core_state.handle_transfer_primary_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_replica_recover_request(
         &self,
         request: ReplicaRecoverRequest<C>,
     ) -> Result<ReplicaRecoverResponse, RpcServiceError> {
-        self.core_state.read().unwrap().handle_replica_recover_request(request).await.map_err(|e| RpcServiceError::from(e))
+        let core_state = {
+            self.core_state.read().unwrap().clone()
+        };
+        core_state.handle_replica_recover_request(request).await.map_err(|e| RpcServiceError::from(e))
     }
 
     async fn handle_install_snapshot_request(

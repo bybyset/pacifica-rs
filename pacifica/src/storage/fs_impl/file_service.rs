@@ -1,19 +1,20 @@
 use crate::rpc::message::{GetFileRequest, GetFileResponse};
 use crate::rpc::RpcServiceError;
-use crate::storage::get_file_rpc::{GetFileClient, GetFileService};
-use crate::storage::fs_impl::{FileMeta};
+use crate::storage::fs_impl::fs_snapshot_storage::{FsSnapshotReaderInner, META_FILE_NAME};
+use crate::storage::fs_impl::FileMeta;
+use crate::storage::get_file_rpc::{GetFileClient};
+use crate::util::AutoClose;
 use crate::TypeConfig;
 use std::cmp::min;
 use std::collections::HashMap;
+use std::error::Error as StdError;
+use std::fmt::{Debug, Display, Formatter};
 use std::fs::File;
 use std::io::{Error, Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::error::Error as StdError;
-use std::fmt::{Debug, Display, Formatter};
-use crate::storage::fs_impl::fs_snapshot_storage::{FsSnapshotReaderInner, META_FILE_NAME};
-use crate::util::AutoClose;
+use std::sync::{Arc, RwLock};
+use crate::storage::GetFileService;
 
 #[cfg(feature = "snapshot-storage-fs")]
 pub enum ReadFileError {
@@ -37,14 +38,10 @@ impl ReadFileError {
 impl Debug for ReadFileError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReadFileError::NotFoundFile {
-                filename
-            } => {
+            ReadFileError::NotFoundFile { filename } => {
                 write!(f, "Not Found File(filename={})", filename)
             }
-            ReadFileError::ReadError {
-                source
-            } => {
+            ReadFileError::ReadError { source } => {
                 write!(f, "Read Error. err: {})", source)
             }
         }
@@ -59,11 +56,10 @@ impl Display for ReadFileError {
 }
 
 #[cfg(feature = "snapshot-storage-fs")]
-impl StdError for ReadFileError {
-
-}
+impl StdError for ReadFileError {}
 
 #[cfg(feature = "snapshot-storage-fs")]
+#[derive(Clone)]
 pub struct FileReader<C, T, GFC>
 where
     C: TypeConfig,
@@ -121,43 +117,136 @@ where
 }
 
 #[cfg(feature = "snapshot-storage-fs")]
+#[derive(Clone)]
 pub struct FileService<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    reader_id_allocator : AtomicUsize,
-    reader_map: HashMap<usize, FileReader<C, T, GFC>>,
+    pub inner: Arc<FileServiceInner<C, T, GFC>>,
 }
-#[cfg(feature = "snapshot-storage-fs")]
-impl<C, T, GFC> FileService<C, T, GFC>
+
+
+impl <C, T, GFC> FileService<C, T, GFC>
 where
     C: TypeConfig,
     T: FileMeta,
     GFC: GetFileClient<C>,
 {
-    pub fn new() -> FileService<C, T, GFC> {
 
+    pub fn new() -> FileService<C, T, GFC> {
+        let inner = Arc::new(FileServiceInner::new());
         FileService {
-            reader_id_allocator: AtomicUsize::new(0),
-            reader_map: HashMap::new(),
+            inner
         }
     }
 
-    pub fn register_file_reader(&mut self, file_reader: FileReader<C, T, GFC>) -> usize {
+
+    pub fn register_file_reader(&self, file_reader: FileReader<C, T, GFC>) -> usize {
+       self.inner.register_file_reader(file_reader)
+    }
+
+    pub fn unregister_file_reader(&self, read_id: usize) -> bool {
+        self.inner.unregister_file_reader(read_id)
+    }
+
+}
+
+
+
+
+pub struct FileServiceInner<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    reader_id_allocator: AtomicUsize,
+    reader_map: RwLock<HashMap<usize, FileReader<C, T, GFC>>>,
+}
+
+
+
+#[cfg(feature = "snapshot-storage-fs")]
+impl<C, T, GFC> FileServiceInner<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    pub fn new() -> FileServiceInner<C, T, GFC> {
+        FileServiceInner {
+            reader_id_allocator: AtomicUsize::new(0),
+            reader_map: RwLock::new(HashMap::new()),
+        }
+    }
+
+    pub fn register_file_reader(&self, file_reader: FileReader<C, T, GFC>) -> usize {
         let reader_id = self.reader_id_allocator.fetch_add(1, Ordering::Relaxed);
-        self.reader_map.insert(reader_id, file_reader);
+        self.reader_map.write().unwrap().insert(reader_id, file_reader);
         reader_id
     }
 
-    pub fn unregister_file_reader(&mut self, read_id: usize) -> bool {
-        let removed = self.reader_map.remove(&read_id);
+    pub fn unregister_file_reader(&self, read_id: usize) -> bool {
+        let removed = self.reader_map.write().unwrap().remove(&read_id);
         removed.is_some()
+    }
+
+    pub fn get_file_handler<>(&self, reader_id: usize) -> Result<GetFileHandler<C, T, GFC>, GetFileResponse> {
+        let reader_map = self.reader_map.read().unwrap();
+        let file_reader = reader_map.get(&reader_id);
+        match file_reader {
+            Some(file_reader) => {
+                Ok(GetFileHandler::new(FileReader::new(
+                    file_reader.fs_snapshot_reader.clone()
+                )))
+            }
+            None => {
+                Err(GetFileResponse::not_found_reader(reader_id))
+            }
+        }
+
     }
 }
 
-#[cfg(feature = "snapshot-storage-fs")]
+pub struct GetFileHandler<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    file_reader: FileReader<C, T, GFC>,
+}
+
+impl<C, T, GFC> GetFileHandler<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+    pub fn new(
+        file_reader: FileReader<C, T, GFC>,
+    ) -> Self {
+        GetFileHandler { file_reader }
+    }
+
+    pub async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
+        let mut buffer: Vec<u8> = Vec::new();
+        let read_result =
+            self.file_reader.read_file(&mut buffer, request.filename, request.offset, request.count).await;
+
+        match read_result {
+            Ok(eof) => Ok(GetFileResponse::success(buffer, eof)),
+            Err(e) => {
+                tracing::error!("Failed to read file. err:{}", e);
+                Ok(e.to_get_file_response())
+            }
+        }
+    }
+}
+
+
 impl<C, T, GFC> GetFileService<C> for FileService<C, T, GFC>
 where
     C: TypeConfig,
@@ -165,23 +254,15 @@ where
     GFC: GetFileClient<C>,
 {
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        let reader_id = request.reader_id;
-        let file_reader = self.reader_map.get(&reader_id);
-        match file_reader {
-            Some(file_reader) => {
-                let mut buffer: Vec<u8> = Vec::new();
-                let read_result =
-                    file_reader.read_file(&mut buffer, request.filename, request.offset, request.count).await;
 
-                match read_result {
-                    Ok(eof) => Ok(GetFileResponse::success(buffer, eof)),
-                    Err(e) => {
-                        tracing::error!("Failed to read file. err:{}", e);
-                        Ok(e.to_get_file_response())
-                    }
-                }
+        let get_file_request = self.inner.get_file_handler(request.reader_id);
+        match get_file_request {
+            Ok(get_file_handler) => {
+                get_file_handler.handle_get_file_request(request).await
             }
-            None => Ok(GetFileResponse::not_found_reader(reader_id)),
+            Err(e) => {
+                Ok(e)
+            }
         }
     }
 }

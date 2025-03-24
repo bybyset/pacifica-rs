@@ -339,6 +339,11 @@ where
 {
     #[inline]
     async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        self.snapshot_storage.read().unwrap().handle_get_file_request(request).await
+        let snapshot_storage = {
+            self.snapshot_storage.read().unwrap().file_service().map_err(|e| {
+                RpcServiceError::storage_error(e.to_string())
+            })
+        }?;
+        snapshot_storage.handle_get_file_request(request).await
     }
 }

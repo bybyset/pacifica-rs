@@ -11,7 +11,7 @@ use pacifica_rs::rpc::message::{
     AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
     ReplicaRecoverRequest, ReplicaRecoverResponse, TransferPrimaryRequest, TransferPrimaryResponse,
 };
-use pacifica_rs::rpc::{RpcServiceError};
+use pacifica_rs::rpc::RpcServiceError;
 use pacifica_rs::storage::{GetFileRequest, GetFileResponse};
 use pacifica_rs::{LogEntry, LogId, NodeId, ReplicaId, TypeConfig};
 
@@ -34,7 +34,6 @@ where
         ReplicaIdProto { group_name, node_id }
     }
 }
-
 
 impl<N> From<ReplicaIdProto> for ReplicaId<N>
 where
@@ -324,6 +323,21 @@ where
     fn from(err: PacificaError<C>) -> Self {
         let err = RpcServiceError::from(err);
         let response_error = ResponseError::from(err);
+        RpcResponse {
+            error: Some(response_error),
+            response: None,
+        }
+    }
+}
+
+impl From<RpcServiceError> for RpcResponse {
+    fn from(value: RpcServiceError) -> Self {
+        let code = value.code;
+        let code = i32::from(code);
+        let response_error = ResponseError {
+            code,
+            message: value.msg,
+        };
         RpcResponse {
             error: Some(response_error),
             response: None,

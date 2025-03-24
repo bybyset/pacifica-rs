@@ -11,7 +11,7 @@ pub trait AsyncRuntime: Debug + Default + PartialEq + Eq + Send + Sync + 'static
     type Instant: Instant;
     type Sleep: Future<Output = ()> + Send + Sync;
     type TimeoutError: Debug + Display + Send;
-    type Timeout<R, T: Future<Output = R> + Send >: Future<Output = Result<R, Self::TimeoutError>>;
+    type Timeout<R, T: Future<Output = R> + Send > : Future<Output = Result<R, Self::TimeoutError>> + Send;
     type Mpsc: Mpsc;
     type MpscUnbounded: MpscUnbounded;
     type Oneshot: Oneshot;

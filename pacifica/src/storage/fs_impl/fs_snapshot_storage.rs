@@ -1,10 +1,8 @@
 
-use crate::rpc::message::{GetFileRequest, GetFileResponse};
-use crate::rpc::RpcServiceError;
 use crate::storage::fs_impl::file_downloader::{DownloadOption, FileDownloader};
 use crate::storage::fs_impl::file_service::{FileReader, FileService};
 use crate::storage::get_file_rpc::GetFileClient;
-use crate::storage::{GetFileService, SnapshotDownloader, SnapshotReader, SnapshotStorage, SnapshotWriter};
+use crate::storage::{SnapshotDownloader, SnapshotReader, SnapshotStorage, SnapshotWriter};
 use crate::util::{AutoClose, Closeable};
 use crate::{LogId, ReplicaId, TypeConfig};
 use anyerror::AnyError;
@@ -64,7 +62,7 @@ where
     last_snapshot_log_index: AtomicUsize,
     ref_map: RwLock<HashMap<usize, AtomicI16>>,
     client: Arc<GFC>,
-    file_service: Arc<RwLock<FileService<C, T, GFC>>>,
+    file_service: Arc<FileService<C, T, GFC>>,
 }
 
 #[cfg(feature = "snapshot-storage-fs")]
@@ -74,7 +72,7 @@ where
     T: FileMeta,
     GFC: GetFileClient<C>,{
     inner: Arc<AutoClose<FsSnapshotReaderInner<C, T, GFC>>>,
-    file_service: Arc<RwLock<FileService<C, T, GFC>>>,
+    file_service: Arc<FileService<C, T, GFC>>,
 }
 
 #[cfg(feature = "snapshot-storage-fs")]
@@ -87,7 +85,7 @@ where
     snapshot_log_index: usize,
     meta_table: SnapshotMetaTable<T>,
     fs_storage: Arc<FsSnapshotStorageInner<C, T, GFC>>,
-    file_service: Arc<RwLock<FileService<C, T, GFC>>>,
+    file_service: Arc<FileService<C, T, GFC>>,
     reader_id: Mutex<Option<usize>>,
     _phantom_data: PhantomData<C>,
 }
@@ -333,7 +331,7 @@ where
             last_snapshot_log_index: AtomicUsize::new(last_snapshot_log_index),
             ref_map: RwLock::new(HashMap::new()),
             client: Arc::new(client),
-            file_service: Arc::new(RwLock::new(file_service)),
+            file_service: Arc::new(file_service)
         };
         // inc last_snapshot_log_index
         if last_snapshot_log_index > 0 {
@@ -561,7 +559,7 @@ where
         let reader_id = self.reader_id.lock().unwrap().take();
         match reader_id {
             Some(reader_id) => {
-                self.file_service.write().unwrap().unregister_file_reader(reader_id);
+                self.file_service.unregister_file_reader(reader_id);
             }
             None => {}
         }
@@ -610,7 +608,7 @@ where
         let mut reader_id = self.inner.reader_id.lock().unwrap();
         let reader_id = reader_id.get_or_insert_with(|| {
             let file_reader = FileReader::new(self.inner.clone());
-            let reader_id = self.file_service.write().unwrap().register_file_reader(file_reader);
+            let reader_id = self.file_service.register_file_reader(file_reader);
             reader_id
         });
         Ok(*reader_id)
@@ -707,6 +705,7 @@ where
     type Reader = FsSnapshotReader<C, T, GFC>;
     type Writer = FsSnapshotWriter<C, T, GFC>;
     type Downloader = FsSnapshotDownloader<C, T, GFC>;
+    type FileService = FileService<C, T, GFC>;
 
     fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
         let last_snapshot_log_index = self.inner.last_snapshot_log_index.load(Ordering::Relaxed);
@@ -742,18 +741,13 @@ where
     ) -> Result<Self::Downloader, AnyError> {
         Ok(FsSnapshotDownloader::new(target_id, reader_id, self.inner.clone()))
     }
-}
 
-#[cfg(feature = "snapshot-storage-fs")]
-impl<C, T, GFC> GetFileService<C> for FsSnapshotStorage<C, T, GFC>
-where
-    C: TypeConfig,
-    T: FileMeta,
-    GFC: GetFileClient<C>,
-{
-    #[inline]
-    async fn handle_get_file_request(&self, request: GetFileRequest) -> Result<GetFileResponse, RpcServiceError> {
-        self.inner.file_service.read().unwrap().handle_get_file_request(request).await
+    fn file_service(&self) -> Result<Self::FileService, AnyError> {
+        let file_service = self.inner.file_service.inner.clone();
+        let file_service = FileService {
+            inner: file_service
+        };
+        Ok(file_service)
     }
 }
 
