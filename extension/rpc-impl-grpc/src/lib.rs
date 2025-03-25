@@ -17,12 +17,22 @@ use pacifica_rs::{LogEntry, LogId, NodeId, ReplicaId, TypeConfig};
 
 mod grpc_client;
 mod grpc_server;
-mod pacifica;
-mod response_error;
+pub mod pacifica;
+pub mod response_error;
 mod router;
 mod tests;
 
 pub type RpcResult<T, E = RpcServiceError> = Result<T, E>;
+
+
+pub use self::grpc_client::GrpcClient;
+pub use self::grpc_client::GrpcPacificaClient;
+pub use self::grpc_server::GrpcServer;
+pub use self::grpc_server::PacificaGrpcService;
+pub use self::router::Router;
+pub use self::router::Node;
+pub use self::router::DefaultRouter;
+
 
 impl<N> From<ReplicaId<N>> for ReplicaIdProto
 where

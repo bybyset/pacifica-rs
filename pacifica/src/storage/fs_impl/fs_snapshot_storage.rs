@@ -284,6 +284,8 @@ impl<T: FileMeta> SnapshotMetaTable<T> {
     }
 }
 
+
+
 #[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotStorageInner<C, T, GFC>
 where
@@ -408,6 +410,35 @@ where
         self.last_snapshot_log_index.store(new_snapshot_log_index, Ordering::Relaxed);
     }
 }
+#[cfg(feature = "snapshot-storage-fs")]
+impl<C, T, GFC> FsSnapshotReader<C, T, GFC>
+where
+    C: TypeConfig,
+    T: FileMeta,
+    GFC: GetFileClient<C>,
+{
+
+
+    pub fn filenames(&self) -> Vec<&str> {
+        self.inner.filenames()
+    }
+
+    pub fn snapshot_dir(&self) -> PathBuf {
+        self.inner.snapshot_dir()
+    }
+
+    pub fn contains_file(&self, filename: &str) -> bool {
+        self.inner.contains_file(filename)
+    }
+
+    pub fn file_meta(&self, filename: &str) -> Option<&T> {
+        self.inner.file_meta(filename)
+    }
+
+
+
+}
+
 
 #[cfg(feature = "snapshot-storage-fs")]
 impl<C, T, GFC> FsSnapshotWriter<C, T, GFC>
@@ -446,6 +477,12 @@ where
     ) -> Result<FsSnapshotWriter<C, T, GFC>, Error> {
         let write_temp_path = fs_storage.get_write_temp_path();
         Self::new(write_temp_path, fs_storage.clone(), for_empty)
+    }
+
+
+    ///
+    pub fn get_write_path(&self) -> PathBuf {
+        PathBuf::from(self.write_path.as_path())
     }
 
     pub fn add_file(&mut self, filename: String) -> Option<T> {

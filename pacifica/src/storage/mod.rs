@@ -19,6 +19,7 @@ pub mod fs_impl {
     pub use self::fs_snapshot_storage::FsSnapshotReader;
     pub use self::fs_snapshot_storage::FsSnapshotWriter;
     pub use self::fs_snapshot_storage::FileMeta;
+    pub use self::fs_snapshot_storage::DefaultFileMeta;
 
     pub use self::file_service::GetFileHandler;
     pub use self::file_service::FileService;
@@ -28,6 +29,7 @@ pub mod fs_impl {
     pub use file_downloader::FileDownloader;
     pub use file_downloader::DownloadOption;
     pub use file_downloader::DownloadFileError;
+
 }
 
 

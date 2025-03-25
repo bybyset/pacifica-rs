@@ -20,6 +20,11 @@ where
         ReplicaId { inner: Arc::new(inner) }
     }
 
+    pub fn with_str(group_name: &str, node_id: N) -> Self {
+        let group_name = group_name.to_string();
+        Self::new(group_name, node_id)
+    }
+
     pub fn group_name(&self) -> String {
         self.inner.group_name.clone()
     }

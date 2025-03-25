@@ -8,6 +8,8 @@ edition = "2021"
 
 pacifica-rs = { path = "../../pacifica" , features = ["tokio-runtime"]}
 pacifica-rs-rpc-impl-grpc = {path = "../../extension/rpc-impl-grpc"}
+anyerror = "0.1.12"
+tokio = "1.41.1"
 
 
 bytes = "1.9.0"

@@ -49,12 +49,12 @@ where
     /// MetaClient ReplicaClient
     pub async fn new(
         replica_id: ReplicaId<NodeIdOf<C>>,
-        replica_option: ReplicaOption,
         fsm: FSM,
         log_storage: LogStorageOf<C>,
         snapshot_storage: SnapshotStorageOf<C>,
         meta_client: MetaClientOf<C>,
         replica_client: ReplicaClientOf<C>,
+        replica_option: ReplicaOption,
     ) -> Result<Self, LifeCycleError>
     where
         FSM: StateMachine<C>,

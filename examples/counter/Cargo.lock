@@ -1024,9 +1024,11 @@ dependencies = [
 name = "pacifica-rs-example-counter"
 version = "0.1.0"
 dependencies = [
+ "anyerror",
  "bytes",
  "pacifica-rs",
  "pacifica-rs-rpc-impl-grpc",
+ "tokio",
 ]
 
 [[package]]

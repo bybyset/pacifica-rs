@@ -8,7 +8,7 @@ pub enum CounterRequest {
 }
 
 pub struct CounterResponse {
-    val: u64
+    pub(crate) val: u64
 }
 
 impl Debug for CounterRequest {

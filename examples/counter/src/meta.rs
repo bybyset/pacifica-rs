@@ -1,28 +1,51 @@
-use std::future::Future;
-use pacifica_rs::{MetaClient, ReplicaGroup, ReplicaId};
+use crate::{CounterConfig, COUNTER_GROUP_NAME};
 use pacifica_rs::config_cluster::MetaError;
-use crate::CounterConfig;
+use pacifica_rs::{MetaClient, ReplicaGroup, ReplicaId};
+use std::future::Future;
 
-pub struct CounterMetaClient;
-
-impl CounterMetaClient {
-
+pub struct CounterMetaClient {
+    replica_group: ReplicaGroup<CounterConfig>,
 }
 
-impl MetaClient<CounterConfig> for CounterMetaClient{
-    fn get_replica_group(&self, group_name: &str) -> impl Future<Output=Result<ReplicaGroup<CounterConfig>, MetaError>> + Send {
-        todo!()
+impl CounterMetaClient {
+    pub fn new() -> CounterMetaClient {
+        let group_name = String::from(COUNTER_GROUP_NAME);
+        let primary = String::from("node_01");
+        CounterMetaClient {
+            replica_group: ReplicaGroup::new(group_name, 1, 1, primary, vec![]),
+        }
+    }
+}
+
+impl MetaClient<CounterConfig> for CounterMetaClient {
+    fn get_replica_group(
+        &self,
+        _group_name: &str,
+    ) -> impl Future<Output = Result<ReplicaGroup<CounterConfig>, MetaError>> + Send {
+        async { Ok(self.replica_group.clone()) }
     }
 
-    fn add_secondary(&self, replica_id: ReplicaId<CounterConfig::NodeId>, version: usize) -> impl Future<Output=Result<(), MetaError>> + Send {
-        todo!()
+    fn add_secondary(
+        &self,
+        replica_id: ReplicaId<CounterConfig::NodeId>,
+        version: usize,
+    ) -> impl Future<Output = Result<(), MetaError>> + Send {
+        async { Ok(()) }
     }
 
-    fn remove_secondary(&self, replica_id: ReplicaId<CounterConfig::NodeId>, version: usize) -> impl Future<Output=Result<(), MetaError>> + Send {
-        todo!()
+    fn remove_secondary(
+        &self,
+        replica_id: ReplicaId<CounterConfig::NodeId>,
+        version: usize,
+    ) -> impl Future<Output = Result<(), MetaError>> + Send {
+        async { Ok(()) }
     }
 
-    fn change_primary(&self, replica_id: ReplicaId<CounterConfig::NodeId>, version: usize) -> impl Future<Output=Result<(), MetaError>> + Send {
-        todo!()
+    fn change_primary(
+        &self,
+        replica_id: ReplicaId<CounterConfig::NodeId>,
+        version: usize,
+    ) -> impl Future<Output = Result<(), MetaError>> + Send {
+        async { Ok(()) }
     }
 }

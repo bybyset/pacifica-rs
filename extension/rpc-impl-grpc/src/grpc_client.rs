@@ -59,7 +59,7 @@ where
     C: TypeConfig,
     R: Router<C::NodeId>,
 {
-    pub async fn new(router: R) -> GrpcPacificaClient<C, R> {
+    pub fn new(router: R) -> GrpcPacificaClient<C, R> {
         GrpcPacificaClient {
             conn_map: RwLock::new(HashMap::new()),
             router,
