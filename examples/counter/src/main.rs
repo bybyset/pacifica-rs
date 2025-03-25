@@ -3,7 +3,7 @@ use std::sync::Arc;
 use pacifica_rs::{Replica, ReplicaId, ReplicaOption, StrNodeId};
 use pacifica_rs::storage::fs_impl::{DefaultFileMeta, FsSnapshotStorage};
 use pacifica_rs::storage::rocksdb_impl::RocksdbLogStore;
-use pacifica_rs_example_counter::{CounterConfig, CounterFSM, CounterGetFileClient, CounterMetaClient, CounterReplicaClient, CounterRequest};
+use pacifica_rs_example_counter::{CounterConfig, CounterFSM, CounterGetFileClient, CounterMetaClient, CounterReplicaClient, CounterRequest, CounterResponse};
 use pacifica_rs_rpc_impl_grpc::{DefaultRouter, GrpcPacificaClient};
 
 
@@ -16,7 +16,7 @@ use pacifica_rs_rpc_impl_grpc::{DefaultRouter, GrpcPacificaClient};
 async fn main() {
     println!("Hello, world!");
 
-    let base_dir = PathBuf::from("");
+    let base_dir = PathBuf::from("D:\\TRS\\tmp\\pacifica-rs");
 
     let node_id = StrNodeId::with_str("node_01");
     let replica_id = ReplicaId::with_str("counter", node_id);
@@ -50,7 +50,7 @@ async fn main() {
         replica_options
     ).await.unwrap();
 
-    let result = replica.commit(CounterRequest::Increment).await;
+    let result = replica.commit(CounterRequest::Increment).await.unwrap();
 
-
+    println!("{:?}", result)
 }

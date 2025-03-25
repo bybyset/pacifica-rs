@@ -1,6 +1,6 @@
 use crate::{CounterConfig, COUNTER_GROUP_NAME};
 use pacifica_rs::config_cluster::MetaError;
-use pacifica_rs::{MetaClient, ReplicaGroup, ReplicaId};
+use pacifica_rs::{MetaClient, ReplicaGroup, ReplicaId, StrNodeId};
 use std::future::Future;
 
 pub struct CounterMetaClient {
@@ -10,7 +10,7 @@ pub struct CounterMetaClient {
 impl CounterMetaClient {
     pub fn new() -> CounterMetaClient {
         let group_name = String::from(COUNTER_GROUP_NAME);
-        let primary = String::from("node_01");
+        let primary = StrNodeId::with_str("node01");
         CounterMetaClient {
             replica_group: ReplicaGroup::new(group_name, 1, 1, primary, vec![]),
         }
@@ -27,7 +27,7 @@ impl MetaClient<CounterConfig> for CounterMetaClient {
 
     fn add_secondary(
         &self,
-        replica_id: ReplicaId<CounterConfig::NodeId>,
+        replica_id: ReplicaId<StrNodeId>,
         version: usize,
     ) -> impl Future<Output = Result<(), MetaError>> + Send {
         async { Ok(()) }
@@ -35,7 +35,7 @@ impl MetaClient<CounterConfig> for CounterMetaClient {
 
     fn remove_secondary(
         &self,
-        replica_id: ReplicaId<CounterConfig::NodeId>,
+        replica_id: ReplicaId<StrNodeId>,
         version: usize,
     ) -> impl Future<Output = Result<(), MetaError>> + Send {
         async { Ok(()) }
@@ -43,7 +43,7 @@ impl MetaClient<CounterConfig> for CounterMetaClient {
 
     fn change_primary(
         &self,
-        replica_id: ReplicaId<CounterConfig::NodeId>,
+        replica_id: ReplicaId<StrNodeId>,
         version: usize,
     ) -> impl Future<Output = Result<(), MetaError>> + Send {
         async { Ok(()) }

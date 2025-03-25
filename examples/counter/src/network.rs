@@ -26,7 +26,7 @@ impl CounterGetFileClient {
 impl GetFileClient<CounterConfig> for CounterGetFileClient {
     fn get_file(
         &self,
-        target_id: ReplicaId<CounterConfig::NodeId>,
+        target_id: ReplicaId<StrNodeId>,
         request: GetFileRequest,
         rpc_option: RpcOption,
     ) -> impl Future<Output = Result<GetFileResponse, RpcClientError>> + Send {
@@ -46,48 +46,61 @@ impl CounterReplicaClient {
     }
 }
 impl ConnectionClient<CounterConfig> for CounterReplicaClient {
+    async fn connect(&self, replica_id: &ReplicaId<StrNodeId>) -> Result<(), ConnectError<CounterConfig>>{
+        self.grpc_pacifica_client.connect(replica_id).await
+    }
+
+    async fn disconnect(&self, replica_id: &ReplicaId<StrNodeId>) -> bool {
+        self.grpc_pacifica_client.disconnect(replica_id).await
+    }
+
     async fn check_connected(
         &self,
-        replica_id: &ReplicaId<CounterConfig::NodeId>,
+        replica_id: &ReplicaId<StrNodeId>,
         create_if_absent: bool,
     ) -> Result<bool, ConnectError<CounterConfig>> {
-        self.grpc_pacifica_client.check_connected(replica_id, create_if_absent)
+        self.grpc_pacifica_client.check_connected(replica_id, create_if_absent).await
+    }
+
+    async fn is_connected(&self, replica_id: &ReplicaId<StrNodeId>) -> bool {
+        self.grpc_pacifica_client.is_connected(replica_id).await
     }
 }
 
 impl ReplicaClient<CounterConfig> for CounterReplicaClient {
-    fn append_entries(
+    async fn append_entries(
         &self,
-        target: ReplicaId<CounterConfig::NodeId>,
+        target: ReplicaId<StrNodeId>,
         request: AppendEntriesRequest<CounterConfig>,
         rpc_option: RpcOption,
-    ) -> impl Future<Output = Result<AppendEntriesResponse, RpcClientError>> + Send {
+    ) -> Result<AppendEntriesResponse, RpcClientError> {
+        self.grpc_pacifica_client.append_entries(target, request, rpc_option).await
     }
 
-    fn install_snapshot(
+    async fn install_snapshot(
         &self,
-        target_id: ReplicaId<CounterConfig::NodeId>,
+        target_id: ReplicaId<StrNodeId>,
         request: InstallSnapshotRequest<CounterConfig>,
         rpc_option: RpcOption,
-    ) -> impl Future<Output = Result<InstallSnapshotResponse, RpcClientError>> + Send {
-        todo!()
+    ) -> Result<InstallSnapshotResponse, RpcClientError> {
+        self.grpc_pacifica_client.install_snapshot(target_id, request, rpc_option).await
     }
 
-    fn replica_recover(
+    async fn replica_recover(
         &self,
-        primary_id: ReplicaId<CounterConfig::NodeId>,
+        primary_id: ReplicaId<StrNodeId>,
         request: ReplicaRecoverRequest<CounterConfig>,
         rpc_option: RpcOption,
-    ) -> impl Future<Output = Result<ReplicaRecoverResponse, RpcClientError>> + Send {
-        todo!()
+    ) -> Result<ReplicaRecoverResponse, RpcClientError>{
+        self.grpc_pacifica_client.replica_recover(primary_id, request, rpc_option).await
     }
 
-    fn transfer_primary(
+    async fn transfer_primary(
         &self,
-        secondary_id: ReplicaId<CounterConfig::NodeId>,
+        secondary_id: ReplicaId<StrNodeId>,
         request: TransferPrimaryRequest<CounterConfig>,
         rpc_option: RpcOption,
-    ) -> impl Future<Output = Result<TransferPrimaryResponse, RpcClientError>> + Send {
-        todo!()
+    ) -> Result<TransferPrimaryResponse, RpcClientError>{
+        self.grpc_pacifica_client.transfer_primary(secondary_id, request, rpc_option).await
     }
 }

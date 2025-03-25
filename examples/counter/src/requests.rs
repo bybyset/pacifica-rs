@@ -8,8 +8,9 @@ pub enum CounterRequest {
 }
 
 pub struct CounterResponse {
-    pub(crate) val: u64
+    pub val: u64
 }
+
 
 impl Debug for CounterRequest {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
