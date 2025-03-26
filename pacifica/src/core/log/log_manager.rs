@@ -15,6 +15,7 @@ use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use tracing::Span;
 use crate::storage::{LogReader, LogStorage, LogWriter, StorageError};
 
 pub(crate) struct LogManager<C>
@@ -29,14 +30,14 @@ where
     log_manager_inner: Arc<LogManagerInner<C>>,
     work_handler: Mutex<Option<WorkHandler<C>>>,
     tx_task: TaskSender<C, Task<C>>,
-
+    span: Span
 }
 
 impl<C> LogManager<C>
 where
     C: TypeConfig,
 {
-    pub(crate) fn new(log_storage: C::LogStorage, replica_option: Arc<ReplicaOption>) -> Self {
+    pub(crate) fn new(log_storage: C::LogStorage, replica_option: Arc<ReplicaOption>, span: Span) -> Self {
         let (tx_task, rx_task) = C::mpsc_unbounded();
         let log_storage = Arc::new(log_storage);
         let first_log_index = Arc::new(AtomicUsize::new(0));
@@ -71,6 +72,7 @@ where
             log_manager_inner,
             work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
+            span
         }
     }
 
@@ -143,7 +145,9 @@ impl<C> Lifecycle<C> for LogManager<C>
 where
     C: TypeConfig,
 {
+    #[tracing::instrument(level = "debug", skip(self))]
     async fn startup(&self) -> Result<(), LifeCycleError> {
+        tracing::debug!("starting...");
         let log_reader = self.log_storage.open_reader().await;
         let log_reader = log_reader.map_err(|e| LifeCycleError::StartupError(e))?;
         // set first log index
@@ -151,14 +155,18 @@ where
             .await
             .map_err(|e| LifeCycleError::StartupError(e))?;
         if let Some(first_log_index) = first_log_index {
+            tracing::debug!("first log index: {}", first_log_index);
             self.last_log_index.store(first_log_index, Ordering::Relaxed);
         }
+
         // set last log index
         let last_log_index = log_reader.get_last_log_index()
             .await.map_err(|e| LifeCycleError::StartupError(e))?;
         if let Some(last_log_index) = last_log_index {
+            tracing::debug!("last log index: {}", last_log_index);
             self.last_log_index.store(last_log_index, Ordering::Relaxed);
         }
+        tracing::debug!("started");
         Ok(())
     }
 

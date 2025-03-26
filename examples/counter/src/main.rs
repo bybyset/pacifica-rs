@@ -1,20 +1,22 @@
-use std::path::PathBuf;
-use std::sync::Arc;
-use pacifica_rs::{Replica, ReplicaId, ReplicaOption, StrNodeId};
 use pacifica_rs::storage::fs_impl::{DefaultFileMeta, FsSnapshotStorage};
 use pacifica_rs::storage::rocksdb_impl::RocksdbLogStore;
+use pacifica_rs::{Replica, ReplicaId, ReplicaOption, StrNodeId};
 use pacifica_rs_example_counter::{CounterConfig, CounterFSM, CounterGetFileClient, CounterMetaClient, CounterReplicaClient, CounterRequest, CounterResponse};
 use pacifica_rs_rpc_impl_grpc::{DefaultRouter, GrpcPacificaClient};
-
-
-
-
-
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::Level;
+use tracing_subscriber::fmt::time;
+use tracing_subscriber::{fmt, EnvFilter};
 
 
 #[tokio::main()]
 async fn main() {
-    println!("Hello, world!");
+
+    fmt::Subscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .init();
+    tracing::debug!("Hello, world!");
 
     let base_dir = PathBuf::from("D:\\TRS\\tmp\\pacifica-rs");
 
@@ -48,9 +50,17 @@ async fn main() {
         meta_client,
         replica_client,
         replica_options
-    ).await.unwrap();
+    ).await;
 
-    let result = replica.commit(CounterRequest::Increment).await.unwrap();
+    match replica {
+        Ok(replica) => {
+            println!("start pacifica");
+            let result = replica.commit(CounterRequest::Increment).await.unwrap();
 
-    println!("{:?}", result)
+            println!("{:?}", result)
+        }
+        Err(e) => {
+            println!("Error: {:?}", e);
+        }
+    }
 }
