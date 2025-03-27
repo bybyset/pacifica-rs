@@ -441,7 +441,6 @@ where
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         tracing::debug!("starting...");
         loop {
-            tracing::debug!("looping...");
             futures::select_biased! {
                 _ = (&mut rx_shutdown).fuse() =>{
                     tracing::info!("Received shutdown signal.");
@@ -451,7 +450,6 @@ where
                 notification_msg = self.rx_notification.recv().fuse() =>{
                     match notification_msg{
                         Some(msg) => {
-                            tracing::debug!("Received notification signal.");
                             let result =  self.handle_notification_msg(msg).await;
                             if let Err(e) = result {
                                 tracing::error!("handle notification msg error: {:?}", e);
@@ -459,7 +457,7 @@ where
                             }
                         },
                         None => {
-                            tracing::error!("all rx_notification senders are dropped");
+                            tracing::error!("All core notification senders are dropped");
                         }
                     }
                 }
@@ -467,11 +465,10 @@ where
                 api_msg = self.rx_api.recv().fuse() =>{
                     match api_msg {
                         Some(msg) => {
-                            tracing::debug!("Received api signal.");
                             self.handle_api_msg(msg).await;
                         },
                         None => {
-
+                            tracing::error!("All api senders are dropped");
                         }
                     }
                 }

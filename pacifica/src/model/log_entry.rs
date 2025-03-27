@@ -119,7 +119,18 @@ impl Display for LogEntry {
 
 impl Checksum for LogEntry {
     fn checksum(&self) -> u64 {
-        todo!()
+        let mut checksum = self.log_id.index as u64;
+        checksum = checksum.wrapping_add(self.log_id.term as u64);
+        match &self.payload {
+            LogEntryPayload::Normal { op_data } => {
+                for byte in op_data.iter() {
+                    checksum = checksum.wrapping_add(*byte as u64);
+                    checksum = checksum.wrapping_mul(31);
+                }
+            }
+            LogEntryPayload::Empty => {}
+        }
+        checksum
     }
 
     fn is_corrupted(&self) -> bool {
