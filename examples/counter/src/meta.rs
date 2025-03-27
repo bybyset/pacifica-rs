@@ -10,7 +10,7 @@ pub struct CounterMetaClient {
 impl CounterMetaClient {
     pub fn new() -> CounterMetaClient {
         let group_name = String::from(COUNTER_GROUP_NAME);
-        let primary = StrNodeId::with_str("node01");
+        let primary = StrNodeId::with_str("node_01");
         CounterMetaClient {
             replica_group: ReplicaGroup::new(group_name, 1, 1, primary, vec![]),
         }

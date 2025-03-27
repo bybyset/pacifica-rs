@@ -238,27 +238,36 @@ where
         }
     }
 
+    #[tracing::instrument(level = "debug", skip(self), fields(replica_id = %self.current_id))]
     async fn handle_elect_self(&mut self) -> Result<(), MetaError> {
         let new_primary = self.current_id.clone();
         let replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.change_primary(new_primary, replica_group.version()).await;
-        result
-    }
-
-    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), MetaError> {
-        let mut replica_group = self.refresh_get_replica_group().await?;
-        let result = self.meta_client.remove_secondary(replica_id.clone(), replica_group.version()).await;
         if result.is_ok() {
-            let node_id = replica_id.node_id();
-            replica_group.remove_secondary(&node_id)
+            tracing::info!("success to elect self.");
         }
         result
     }
 
+    #[tracing::instrument(level = "debug", skip(self, replica_id), fields(replica_id = %self.current_id))]
+    async fn handle_remove_secondary(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), MetaError> {
+        let mut replica_group = self.refresh_get_replica_group().await?;
+        let result = self.meta_client.remove_secondary(replica_id.clone(), replica_group.version()).await;
+        if result.is_ok() {
+            tracing::info!("success to remove secondary {}", replica_id);
+            let node_id = replica_id.node_id();
+            replica_group.remove_secondary(&node_id)
+
+        }
+        result
+    }
+
+    #[tracing::instrument(level = "debug", skip(self, replica_id), fields(replica_id = %self.current_id))]
     async fn handle_add_secondary(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), MetaError> {
         let mut replica_group = self.refresh_get_replica_group().await?;
         let result = self.meta_client.add_secondary(replica_id.clone(), replica_group.version()).await;
         if result.is_ok() {
+            tracing::info!("success to add secondary {}", replica_id);
             let node_id = replica_id.node_id();
             replica_group.add_secondary(node_id)
         }
@@ -270,6 +279,7 @@ impl<C> LoopHandler<C> for WorkHandler<C>
 where
     C: TypeConfig,
 {
+
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         loop {
             futures::select_biased! {

@@ -20,6 +20,8 @@ use crate::{LogId, TypeConfig};
 use anyerror::AnyError;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use tracing::{Level, Span};
+use tracing_futures::Instrument;
 
 pub(crate) struct StateMachineCaller<C, FSM>
 where
@@ -29,6 +31,7 @@ where
     committed_log_index: Arc<AtomicUsize>,
     work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
     tx_task: TaskSender<C, Task<C>>,
+    span: Span
 }
 
 impl<C, FSM> StateMachineCaller<C, FSM>
@@ -40,22 +43,30 @@ where
         fsm: FSM,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         core_notification: Arc<CoreNotification<C>>,
+        span: Span
     ) -> Self {
         let committed_log_index = Arc::new(AtomicUsize::new(0));
         let (tx_task, rx_task) = C::mpsc_unbounded();
 
+        let work_span = tracing::span!(
+            parent: &span,
+            Level::DEBUG,
+            "WorkHandler",
+        );
         let work_handler = WorkHandler::new(
             committed_log_index.clone(),
             fsm,
             log_manager,
             core_notification,
             rx_task,
+            work_span,
         );
 
         let fsm_caller = StateMachineCaller {
             committed_log_index,
             work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
+            span
         };
         fsm_caller
     }
@@ -133,6 +144,7 @@ where
     core_notification: Arc<CoreNotification<C>>,
     fatal: Option<Fatal>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    span: Span
 }
 
 impl<C, FSM> WorkHandler<C, FSM>
@@ -146,6 +158,7 @@ where
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+        span: Span
     ) -> WorkHandler<C, FSM> {
         let committed_log_id = LogId::default();
         WorkHandler {
@@ -155,7 +168,8 @@ where
             log_manager,
             core_notification,
             fatal: None,
-            rx_task
+            rx_task,
+            span
         }
     }
 
@@ -378,8 +392,11 @@ where
     FSM: StateMachine<C>,
 {
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
-        loop {
-            futures::select_biased! {
+        let span = self.span.clone();
+        let lopper = async move {
+            tracing::debug!("starting...");
+            loop {
+                futures::select_biased! {
                  _ = (&mut rx_shutdown).fuse() => {
                         tracing::info!("StateMachineCaller received shutdown signal.");
                         break;
@@ -400,9 +417,11 @@ where
                     }
                 }
             }
+            };
+            self.on_shutdown();
+            Ok(())
         };
-        self.on_shutdown();
-        Ok(())
+        lopper.instrument(span).await
     }
 }
 
@@ -411,10 +430,12 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn startup(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn shutdown(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }

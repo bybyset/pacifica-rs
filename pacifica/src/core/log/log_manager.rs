@@ -15,7 +15,8 @@ use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::Span;
+use tracing::{span, Level, Span};
+use tracing_futures::Instrument;
 use crate::storage::{LogReader, LogStorage, LogWriter, StorageError};
 
 pub(crate) struct LogManager<C>
@@ -52,6 +53,11 @@ where
             replica_option.clone(),
         ));
 
+        let work_span = tracing::span!(
+            parent: &span,
+            Level::DEBUG,
+            "WorkHandler",
+        );
 
         let work_handler = WorkHandler::new(
             log_storage.clone(),
@@ -60,7 +66,8 @@ where
             last_snapshot_log_id.clone(),
             replica_option.clone(),
             log_manager_inner.clone(),
-            rx_task
+            rx_task,
+            work_span
         );
 
         Self {
@@ -145,7 +152,7 @@ impl<C> Lifecycle<C> for LogManager<C>
 where
     C: TypeConfig,
 {
-    #[tracing::instrument(level = "debug", skip(self))]
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn startup(&self) -> Result<(), LifeCycleError> {
         tracing::debug!("starting...");
         let log_reader = self.log_storage.open_reader().await;
@@ -170,6 +177,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn shutdown(&self) -> Result<(), LifeCycleError> {
 
         Ok(())
@@ -305,6 +313,7 @@ where C: TypeConfig{
     replica_option: Arc<ReplicaOption>,
     log_manager_inner: Arc<LogManagerInner<C>>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    span: Span
 }
 
 impl<C> WorkHandler<C>
@@ -318,6 +327,7 @@ where C: TypeConfig {
         replica_option: Arc<ReplicaOption>,
         log_manager_inner: Arc<LogManagerInner<C>>,
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+        span: Span,
     ) -> WorkHandler<C> {
         WorkHandler {
             log_storage,
@@ -327,6 +337,7 @@ where C: TypeConfig {
             replica_option,
             log_manager_inner,
             rx_task,
+            span
         }
     }
 
@@ -512,9 +523,14 @@ where C: TypeConfig {
 }
 
 impl<C> LoopHandler<C> for WorkHandler<C> where C: TypeConfig {
+
+
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) ->Result<(), LifeCycleError> {
-        loop {
-            futures::select_biased! {
+        let span = self.span.clone();
+        let looper = async move {
+            tracing::debug!("starting...");
+            loop {
+                futures::select_biased! {
                 _ = (&mut rx_shutdown).fuse() => {
                         tracing::debug!("LogManager received shutdown signal.");
                         break;
@@ -532,9 +548,11 @@ impl<C> LoopHandler<C> for WorkHandler<C> where C: TypeConfig {
                     }
                 }
             }
-        }
+            }
 
-        Ok(())
+            Ok(())
+        };
+        looper.instrument(span).await
     }
 }
 

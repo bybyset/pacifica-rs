@@ -78,23 +78,36 @@ where
             parent: &core_span,
             Level::DEBUG,
             "LogManager",
-            replica_id = %replica_id,
         );
         let log_manager = Arc::new(ReplicaComponent::new(LogManager::new(
             log_storage,
             replica_option.clone(),
             log_span
         )));
+
+        let fsm_span = tracing::span!(
+            parent: &core_span,
+            Level::DEBUG,
+            "StateMachineCaller",
+        );
         let fsm_caller = Arc::new(ReplicaComponent::new(StateMachineCaller::new(
             fsm,
             log_manager.clone(),
             core_notification.clone(),
+            fsm_span
         )));
+
+        let snapshot_span = tracing::span!(
+            parent: &core_span,
+            Level::DEBUG,
+            "SnapshotExecutor",
+        );
         let snapshot_executor = Arc::new(ReplicaComponent::new(SnapshotExecutor::new(
             snapshot_storage,
             log_manager.clone(),
             fsm_caller.clone(),
             replica_option.clone(),
+            snapshot_span
         )));
 
         let replica_client = Arc::new(replica_client);
@@ -104,6 +117,11 @@ where
         )));
         let core_state = Arc::new(CoreState::Shutdown);
         let core_state = Arc::new(RwLock::new(core_state));
+        let work_span = tracing::span!(
+            parent: &core_span,
+            Level::DEBUG,
+            "WorkHandler",
+        );
 
         let work_handler = WorkHandler {
             replica_id: replica_id.clone(),
@@ -117,6 +135,7 @@ where
             replica_client: replica_client.clone(),
             replica_option: replica_option.clone(),
             core_state: core_state.clone(),
+            span: work_span,
         };
 
         ReplicaCore {
@@ -155,6 +174,8 @@ where
         self.fsm_caller.startup().await?;
         // startup snapshot_executor
         self.snapshot_executor.startup().await?;
+        // startup replica group agent
+        self.replica_group.startup().await?;
         // confirm core_state by config cluster
         self.core_notification.core_state_change().map_err(|e|{
             LifeCycleError::StartupError(AnyError::from(&e))
@@ -194,6 +215,8 @@ where
     replica_group: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replica_client: Arc<C::ReplicaClient>,
     replica_option: Arc<ReplicaOption>,
+
+    span: Span
 
 }
 
@@ -262,12 +285,14 @@ where
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all, err)]
     pub(crate) async fn handle_notification_msg(&mut self, msg: NotificationMsg<C>) -> Result<(), LifeCycleError> {
         match msg {
             NotificationMsg::SendCommitResult { result } => {
                 self.handle_send_commit_result(result)?;
             }
             NotificationMsg::CoreStateChange => {
+                tracing::debug!("core state change");
                 self.handle_state_change().await?;
             }
             NotificationMsg::HigherTerm { term } => {
@@ -311,8 +336,11 @@ where
     }
 
     async fn handle_state_change(&mut self) -> Result<(), LifeCycleError> {
+        tracing::debug!("enter core state change");
+        let _ = self.span.enter();
         let old_replica_state = self.get_replica_state();
         let new_replica_state = self.replica_group.get_state(&self.replica_id).await;
+        tracing::debug!("core state change, old_replica_state: {:?}, new_replica_state: {:?}", old_replica_state, new_replica_state);
         let old_core_state = {
             if old_replica_state != new_replica_state {
                 // state change
@@ -413,6 +441,7 @@ where
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         tracing::debug!("starting...");
         loop {
+            tracing::debug!("looping...");
             futures::select_biased! {
                 _ = (&mut rx_shutdown).fuse() =>{
                     tracing::info!("Received shutdown signal.");
@@ -422,6 +451,7 @@ where
                 notification_msg = self.rx_notification.recv().fuse() =>{
                     match notification_msg{
                         Some(msg) => {
+                            tracing::debug!("Received notification signal.");
                             let result =  self.handle_notification_msg(msg).await;
                             if let Err(e) = result {
                                 tracing::error!("handle notification msg error: {:?}", e);
@@ -437,6 +467,7 @@ where
                 api_msg = self.rx_api.recv().fuse() =>{
                     match api_msg {
                         Some(msg) => {
+                            tracing::debug!("Received api signal.");
                             self.handle_api_msg(msg).await;
                         },
                         None => {

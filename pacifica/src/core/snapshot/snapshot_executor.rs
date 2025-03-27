@@ -17,6 +17,8 @@ use crate::{LogId, ReplicaId, ReplicaOption, TypeConfig};
 use anyerror::AnyError;
 use futures::FutureExt;
 use std::sync::{Arc, Mutex, RwLock};
+use tracing::{Level, Span};
+use tracing_futures::Instrument;
 use crate::fsm::StateMachine;
 
 pub(crate) struct SnapshotExecutor<C, FSM>
@@ -28,6 +30,7 @@ where
     snapshot_timer: RepeatedTimer<C>,
     work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
     tx_task: TaskSender<C, Task<C>>,
+    span: Span,
 }
 
 impl<C, FSM> SnapshotExecutor<C, FSM>
@@ -40,6 +43,7 @@ where
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         replica_option: Arc<ReplicaOption>,
+        span: Span,
     ) -> Self {
         let snapshot_storage = Arc::new(RwLock::new(snapshot_storage));
         let (tx_task, rx_task) = C::mpsc_unbounded();
@@ -49,18 +53,26 @@ where
             );
         let snapshot_timer = RepeatedTimer::new(snapshot_saver, replica_option.snapshot_save_interval(), false);
 
+        let wrk_span = tracing::span!(
+            parent: &span,
+            Level::DEBUG,
+            "WorkHandler",
+        );
+
         let work_handler = WorkHandler::new(
             snapshot_storage.clone(),
             log_manager,
             fsm_caller,
             replica_option,
             rx_task,
+            wrk_span,
         );
         SnapshotExecutor {
             snapshot_storage,
             snapshot_timer,
             work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
+            span
         }
     }
 
@@ -148,6 +160,7 @@ where
     replica_option: Arc<ReplicaOption>,
     last_snapshot_log_id: LogId,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+    span: Span
 }
 
 impl<C, FSM> WorkHandler<C, FSM>
@@ -161,6 +174,7 @@ where
         fsm_caller: Arc<ReplicaComponent<C, StateMachineCaller<C, FSM>>>,
         replica_option: Arc<ReplicaOption>,
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
+        span: Span
     ) -> WorkHandler<C, FSM> {
         WorkHandler {
             snapshot_storage,
@@ -169,6 +183,7 @@ where
             replica_option,
             last_snapshot_log_id: LogId::default(),
             rx_task,
+            span
         }
     }
 
@@ -274,8 +289,11 @@ where
     FSM: StateMachine<C>,
 {
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
-        loop {
-            futures::select_biased! {
+        let span = self.span.clone();
+        let lopper = async move {
+            tracing::debug!("starting...");
+            loop {
+                futures::select_biased! {
                  _ = (&mut rx_shutdown).fuse() => {
                         tracing::info!("received shutdown signal.");
                         break;
@@ -296,8 +314,10 @@ where
                     }
                 }
             }
-        }
-        Ok(())
+            }
+            Ok(())
+        };
+        lopper.instrument(span).await
     }
 }
 
@@ -306,6 +326,8 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn startup(&self) -> Result<(), LifeCycleError> {
         // first load snapshot
         self.load_snapshot().await.map_err(|e| LifeCycleError::StartupError(AnyError::new(&e)))?;
@@ -314,6 +336,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip(self), err)]
     async fn shutdown(&self) -> Result<(), LifeCycleError> {
         let _ = self.snapshot_timer.shutdown();
         Ok(())
