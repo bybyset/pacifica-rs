@@ -26,6 +26,7 @@ clap = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, optional = true }
 rocksdb = {workspace = true, optional = true}
+crc = {workspace = true}
 
 pacifica-rs-macros = { path = "../macros" }
 log = "0.4.22"

@@ -3,6 +3,8 @@ use crate::LogId;
 use std::fmt::{Debug, Display, Formatter};
 use bytes::Bytes;
 
+const CRC_64_ECMA_182: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_ECMA_182);
+
 pub struct LogEntry {
     pub log_id: LogId,
     pub payload: LogEntryPayload,
@@ -119,18 +121,16 @@ impl Display for LogEntry {
 
 impl Checksum for LogEntry {
     fn checksum(&self) -> u64 {
-        let mut checksum = self.log_id.index as u64;
-        checksum = checksum.wrapping_add(self.log_id.term as u64);
+        let mut digest = CRC_64_ECMA_182.digest();
+        digest.update(self.log_id.index.to_le_bytes().as_ref());
+        digest.update(self.log_id.term.to_le_bytes().as_ref());
         match &self.payload {
             LogEntryPayload::Normal { op_data } => {
-                for byte in op_data.iter() {
-                    checksum = checksum.wrapping_add(*byte as u64);
-                    checksum = checksum.wrapping_mul(31);
-                }
+                digest.update(op_data.as_ref());
             }
             LogEntryPayload::Empty => {}
         }
-        checksum
+        digest.finalize()
     }
 
     fn is_corrupted(&self) -> bool {
