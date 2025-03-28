@@ -1,7 +1,8 @@
 use crate::core::fsm::CommitResult;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::TaskSender;
-use crate::error::{Fatal, PacificaError};
+use crate::error::{Fatal, LifeCycleError, PacificaError};
+use crate::runtime::TypeConfigExt;
 use crate::type_config::alias::MpscUnboundedSenderOf;
 use crate::TypeConfig;
 
@@ -38,6 +39,18 @@ where
 
     pub(crate) fn core_state_change(&self) -> Result<(), PacificaError<C>> {
         self.tx_notification.send(NotificationMsg::<C>::CoreStateChange)?;
+        Ok(())
+    }
+
+    pub(crate) async fn core_state_change_and_wait(&self) -> Result<(), PacificaError<C>> {
+        let (tx, rx) = C::oneshot();
+        self.tx_notification.send(NotificationMsg::<C>::CoreStateChangeAndWait {
+            callback: tx
+        })?;
+        let result: Result<(), LifeCycleError> = rx.await?;
+        result.map_err(|e| {
+            PacificaError::Shutdown
+        })?;
         Ok(())
     }
 

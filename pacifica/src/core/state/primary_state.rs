@@ -98,6 +98,7 @@ where
         }
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     pub(crate) fn commit(&self, operation: Operation<C>) -> Result<(), CommitOperationError<C>> {
         let result = self.tx_task.tx_task.send(Task::Commit { operation });
         if let Err(e) = result {
@@ -255,6 +256,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+    current_id: ReplicaId<C::NodeId>,
     ballot_box: Arc<ReplicaComponent<C, BallotBox<C, FSM>>>,
     replica_group_agent: Arc<ReplicaComponent<C, ReplicaGroupAgent<C>>>,
     replicator_group: Arc<ReplicatorGroup<C, FSM>>,
@@ -277,6 +279,7 @@ where
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
     ) -> WorkHandler<C, FSM> {
         WorkHandler {
+            current_id: replica_group_agent.current_id(),
             ballot_box,
             replica_group_agent,
             replicator_group,
@@ -298,7 +301,9 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn handle_commit_task(&mut self, mut operation: Operation<C>) -> Result<(), LifeCycleError> {
+        tracing::debug!("handle commit task");
         //init and append ballot box for the operation
         let replica_group = self.replica_group_agent.get_replica_group().await;
         if let Err(e) = replica_group {
@@ -308,15 +313,15 @@ where
         let request_bytes = operation.request_bytes.take();
         let replica_group = replica_group.unwrap();
         let log_term = replica_group.term();
-
+        // 1. init ballot
         let log_index_result = self.ballot_box.initiate_ballot(replica_group, log_term, operation).await;
         if let Err(e) = log_index_result {
             commit_error(e.operation, e.error);
             return Ok(());
         }
         let log_index = log_index_result.unwrap();
-
-        // append log
+        tracing::debug!("init ballot for log_index: {}, log_term: {}", log_index, log_term);
+        // 2. append log
         let log_entry = {
             let log_id = LogId::new(log_term, log_index);
             if let Some(op_data) = request_bytes {
@@ -336,12 +341,16 @@ where
                 _ => {}
             };
         } else {
-            // replicate log entries
+            tracing::debug!("success to append log for log_index: {}", log_index);
+            // 3.  ballot by self
+            // 3.1 replicate log entries
             let _ = self.replicator_group.continue_replicate_log();
+            let _ = self.ballot_box.ballot_by(self.current_id.clone(), log_index, log_index);
         }
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip_all)]
     async fn handle_remove_secondary(&mut self, secondary_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         tracing::info!("remove secondary {}", secondary_id.to_string());
         self.replica_group_agent.remove_secondary(secondary_id.clone()).await?;
@@ -357,7 +366,9 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+    #[tracing::instrument(level = "debug", skip_all, fields(replica_id = %self.current_id), err)]
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
+        tracing::debug!("starting...");
         loop {
             futures::select_biased! {
             _ = (&mut rx_shutdown).fuse() => {
@@ -366,7 +377,9 @@ where
                 }
             task_msg = self.rx_task.recv().fuse() => {
                     match task_msg {
+
                         Some(task) => {
+                            tracing::debug!("received task message");
                             self.handle_task(task).await?
                         }
                         None => {
@@ -387,13 +400,13 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+    #[tracing::instrument(level = "debug", skip_all, err)]
     async fn startup(&self) -> Result<(), LifeCycleError> {
+        tracing::debug!("starting...");
         // startup ballot box
         self.ballot_box.startup().await?;
         // lease_period_timer
         self.lease_period_timer.turn_on();
-        // reconciliation
-        self.reconciliation().await?;
         Ok(())
     }
 

@@ -266,7 +266,10 @@ where
 {
     async fn startup(&self) -> Result<(), LifeCycleError> {
         match self {
-            CoreState::Primary { state: primary } => primary.startup().await,
+            CoreState::Primary { state: primary } => {
+                primary.startup().await?;
+                primary.reconciliation().await
+            },
             CoreState::Secondary { state } => state.startup().await,
             CoreState::Candidate { state } => state.startup().await,
             CoreState::Stateless { state } => state.startup().await,

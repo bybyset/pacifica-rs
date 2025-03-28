@@ -177,7 +177,7 @@ where
         // startup replica group agent
         self.replica_group.startup().await?;
         // confirm core_state by config cluster
-        self.core_notification.core_state_change().map_err(|e|{
+        self.core_notification.core_state_change_and_wait().await.map_err(|e|{
             LifeCycleError::StartupError(AnyError::from(&e))
         })?;
         tracing::debug!("started...");
@@ -225,7 +225,10 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+
+    #[tracing::instrument(level = "debug", skip_all)]
     fn handle_commit(&self, operation: Operation<C>) {
+        tracing::debug!("Receive operation from api");
         let core_state = self.core_state.read().unwrap();
         let result = core_state.commit_operation(operation);
         if let Err(e) = result {
@@ -292,8 +295,13 @@ where
                 self.handle_send_commit_result(result)?;
             }
             NotificationMsg::CoreStateChange => {
-                tracing::debug!("core state change");
                 self.handle_state_change().await?;
+            }
+            NotificationMsg::CoreStateChangeAndWait {
+                callback
+            } => {
+                let result = self.handle_state_change().await;
+                let _ = send_result::<C, (), LifeCycleError>(callback, result);
             }
             NotificationMsg::HigherTerm { term } => {
                 self.handle_receive_higher_term(term).await?;
@@ -336,8 +344,6 @@ where
     }
 
     async fn handle_state_change(&mut self) -> Result<(), LifeCycleError> {
-        tracing::debug!("enter core state change");
-        let _ = self.span.enter();
         let old_replica_state = self.get_replica_state();
         let new_replica_state = self.replica_group.get_state(&self.replica_id).await;
         tracing::debug!("core state change, old_replica_state: {:?}, new_replica_state: {:?}", old_replica_state, new_replica_state);
@@ -349,6 +355,7 @@ where
                 let new_core_state = Arc::new(new_core_state);
                 let mut core_state = self.core_state.write().unwrap();
                 let old_core_state = std::mem::replace(&mut *core_state, new_core_state);
+                tracing::info!("success to change {:?}", new_replica_state);
                 Some(old_core_state)
             } else {
                 None

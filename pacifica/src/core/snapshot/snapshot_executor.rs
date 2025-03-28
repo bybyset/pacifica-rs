@@ -216,6 +216,7 @@ where
         let writer = AutoClose::new(writer);
         let snapshot_log_id = self.fsm_caller.on_snapshot_save(writer).await?;
         self.on_snapshot_success(snapshot_log_id.clone()).await?;
+        tracing::info!("success to save snapshot. log_id: {}", snapshot_log_id);
         Ok(snapshot_log_id)
     }
 
@@ -229,6 +230,7 @@ where
         if let Some(snapshot_reader) = snapshot_reader {
             // fsm on snapshot load
             let snapshot_log_id = self.fsm_caller.on_snapshot_load(AutoClose::new(snapshot_reader)).await?;
+            tracing::info!("success to load snapshot. log_id: {}", snapshot_log_id);
             //
             self.on_snapshot_success(snapshot_log_id.clone()).await?;
             return Ok(snapshot_log_id);
@@ -259,6 +261,7 @@ where
         let _ = self.do_snapshot_download(target_id, request.read_id).await?;
         // 3. load snapshot
         let log_id = self.do_snapshot_load().await?;
+        tracing::info!("success to install snapshot. log_id: {}", log_id);
         assert_eq!(log_id, request.snapshot_log_id);
         Ok(InstallSnapshotResponse::Success)
     }
@@ -288,6 +291,7 @@ where
     C: TypeConfig,
     FSM: StateMachine<C>,
 {
+    #[tracing::instrument(level = "debug", skip_all, err)]
     async fn run_loop(mut self, mut rx_shutdown: OneshotReceiverOf<C, ()>) -> Result<(), LifeCycleError> {
         let span = self.span.clone();
         let lopper = async move {

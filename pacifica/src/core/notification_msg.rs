@@ -1,5 +1,6 @@
 use crate::core::fsm::CommitResult;
-use crate::error::Fatal;
+use crate::core::ResultSender;
+use crate::error::{Fatal, LifeCycleError};
 use crate::TypeConfig;
 
 pub(crate) enum NotificationMsg<C>
@@ -11,6 +12,10 @@ where
 
     /// replica state of meta changed
     CoreStateChange,
+
+    CoreStateChangeAndWait {
+        callback: ResultSender<C, (), LifeCycleError>
+    },
 
     /// A higher term is received,
     /// Show that the current replica group conf is expired

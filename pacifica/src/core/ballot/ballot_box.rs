@@ -18,6 +18,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicUsize};
 use std::sync::{Arc, Mutex, RwLock};
+use tracing::instrument;
 
 pub(crate) struct BallotBox<C, FSM>
 where
@@ -99,6 +100,7 @@ where
     }
 
     /// cancel ballot
+    #[tracing::instrument(level = "debug", skip_all, fields(replica_id = %replica_id))]
     pub(crate) fn cancel_ballot(&self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {
         let task = Task::CancelBallot {
             replica_id,
@@ -110,6 +112,8 @@ where
     /// receive the ballots of replicaId, [start_log_index, end_log_index], Include boundary values.
     /// When the quorum is satisfied, we commit.
     /// called by primary.
+    ///
+    #[tracing::instrument(level = "debug", skip_all, fields(replica_id = %replica_id, start_log_index = %start_log_index, end_log_index = %end_log_index))]
     pub(crate) fn ballot_by(
         &self,
         replica_id: ReplicaId<C::NodeId>,
@@ -117,6 +121,7 @@ where
         end_log_index: usize,
     ) -> Result<(), PacificaError<C>> {
         assert!(start_log_index <= end_log_index);
+
         let pending_start_index = self.pending_index.load(Relaxed);
         let pending_end_index = pending_start_index + self.ballot_queue.read().unwrap().len();
         if end_log_index < pending_start_index {
@@ -144,21 +149,25 @@ where
                 pending_end_index
             );
         }
+        tracing::debug!("ballot by. pending_start_index: {}, pending_end_index: {}", pending_start_index, pending_end_index);
         let start_log_index = max(start_log_index, pending_start_index);
         let end_log_index = min(end_log_index, pending_end_index);
         assert!(start_log_index <= end_log_index);
         let start_index = start_log_index - pending_start_index;
-        let end_index = end_log_index - start_log_index;
+        let end_index = end_log_index - pending_start_index;
+        tracing::debug!("start_index: {}, end_index: {}", start_index, end_index);
         let ballots = self.ballot_queue.read().unwrap();
         let ballots =  ballots.range(start_index..end_index);
         let log_index = grant_ballots(ballots, start_log_index, &replica_id);
         if log_index >= start_log_index {
             let task = Task::CommitBallot { log_index };
             self.tx_task.send(task)?;
+            tracing::debug!("commit ballot: {}", log_index);
         }
         Ok(())
     }
 
+    #[tracing::instrument(level = "debug", skip_all, fields(replica_id = %replica_id, last_log_index = %last_log_index))]
     pub(crate) async fn caught_up(
         &self,
         replica_id: ReplicaId<C::NodeId>,
@@ -173,6 +182,11 @@ where
             })
             .map_err(|e| CaughtUpError::PacificaError(e))?;
         let result: Result<bool, CaughtUpError<C>> = rx.await.unwrap();
+        if let Ok(caught) = result {
+            if caught {
+                tracing::info!("success to caught up");
+            }
+        }
         result
     }
 
@@ -232,6 +246,8 @@ where
     FSM: StateMachine<C>,
 {
     async fn startup(&self) -> Result<(), LifeCycleError> {
+        let pending_index = self.pending_index.load(Relaxed);
+        tracing::info!("pending_log_index: {}", pending_index, );
         Ok(())
     }
 
@@ -360,7 +376,7 @@ where
             request,
             result_sender,
         });
-        self.pending_index.load(Relaxed) + ballot_queue.len()
+        self.pending_index.load(Relaxed) - 1 + ballot_queue.len()
     }
 
     fn handle_cancel_ballot(&mut self, replica_id: ReplicaId<C::NodeId>) -> Result<(), PacificaError<C>> {

@@ -140,6 +140,7 @@ impl<C> Lifecycle<C> for ReplicaGroupAgent<C>
 where
     C: TypeConfig,
 {
+
     async fn startup(&self) -> Result<(), LifeCycleError> {
         Ok(())
     }
