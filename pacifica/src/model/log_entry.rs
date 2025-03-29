@@ -148,3 +148,66 @@ fn write_format(log_entry: &LogEntry, f: &mut Formatter<'_>) -> std::fmt::Result
         log_entry.log_id.term, log_entry.log_id.index, log_entry.payload
     )
 }
+
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use bytes::Bytes;
+    use crate::{LogEntry, LogId};
+    use crate::util::Checksum;
+
+    #[test]
+    pub(crate) fn test_checksum() {
+        // 测试空日志条目的 checksum
+        let mut empty_entry = LogEntry::with_empty(LogId::new(1, 1));
+        let empty_checksum = empty_entry.checksum();
+        empty_entry.set_check_sum(empty_checksum);
+        assert!(!empty_entry.is_corrupted());
+
+        // 测试带数据的日志条目的 checksum
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let mut entry = LogEntry::with_op_data(LogId::new(2, 2), data);
+        let checksum = entry.checksum();
+        entry.set_check_sum(checksum);
+        assert!(!entry.is_corrupted());
+
+        // 测试数据损坏的情况
+        entry.set_check_sum(checksum + 1); // 故意设置错误的 checksum
+        assert!(entry.is_corrupted());
+
+        // 测试不同数据产生不同的 checksum
+        let data1 = Bytes::from(vec![1, 2, 3, 4]);
+        let data2 = Bytes::from(vec![1, 2, 3, 5]);
+        let entry1 = LogEntry::with_op_data(LogId::new(1, 1), data1);
+        let entry2 = LogEntry::with_op_data(LogId::new(1, 1), data2);
+        assert_ne!(entry1.checksum(), entry2.checksum());
+    }
+
+
+
+    #[test]
+    pub(crate) fn test_checksum_components() {
+        // 测试日志 ID 的不同组件对 checksum 的影响
+        let data = Bytes::from(vec![1, 2, 3]);
+
+        // 相同数据，不同 term
+        let entry1 = LogEntry::with_op_data(LogId::new(1, 1), data.clone());
+        let entry2 = LogEntry::with_op_data(LogId::new(2, 1), data.clone());
+        assert_ne!(entry1.checksum(), entry2.checksum());
+
+        // 相同数据，不同 index
+        let entry3 = LogEntry::with_op_data(LogId::new(1, 1), data.clone());
+        let entry4 = LogEntry::with_op_data(LogId::new(1, 2), data);
+        assert_ne!(entry3.checksum(), entry4.checksum());
+    }
+
+    #[test]
+    pub(crate) fn test_has_checksum() {
+        let mut entry = LogEntry::with_empty(LogId::new(1, 1));
+        assert!(!entry.has_check_sum());
+
+        entry.set_check_sum(123);
+        assert!(entry.has_check_sum());
+    }
+
+}

@@ -77,7 +77,7 @@ pub mod tests {
     pub(crate) struct MockSnapshotReader {}
     pub(crate) struct MockSnapshotDownloader {}
     pub(crate) struct MockSnapshotStorage {}
-
+    pub(crate) struct MockFileService {}
 
     impl Closeable for MockSnapshotReader {
         fn close(&mut self) -> Result<(), AnyError> {
@@ -112,7 +112,7 @@ pub mod tests {
             Ok(())
         }
     }
-    impl<C> GetFileService<C> for MockSnapshotStorage
+    impl<C> GetFileService<C> for MockFileService
     where
         C: TypeConfig,
     {
@@ -126,6 +126,7 @@ pub mod tests {
         type Reader = MockSnapshotReader;
         type Writer = MockSnapshotWriter;
         type Downloader = MockSnapshotDownloader;
+        type FileService = MockFileService;
 
         fn open_reader(&mut self) -> Result<Option<Self::Reader>, AnyError> {
             Ok(Some(MockSnapshotReader{}))
@@ -137,6 +138,10 @@ pub mod tests {
 
         fn open_downloader(&mut self, _target_id: ReplicaId<C::NodeId>, _reader_id: usize) -> Result<Self::Downloader, AnyError> {
             Ok(MockSnapshotDownloader{})
+        }
+
+        fn file_service(&self) -> Result<Self::FileService, AnyError> {
+            Ok(MockFileService{})
         }
     }
 

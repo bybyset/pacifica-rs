@@ -1,5 +1,5 @@
 use futures::FutureExt;
-use crate::core::fsm::{CommitResult, StateMachineCaller};
+use crate::core::fsm::{CommitResultBatch, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::notification_msg::NotificationMsg;
@@ -335,7 +335,7 @@ where
         Ok(())
     }
 
-    fn handle_send_commit_result(&self, result: CommitResult<C>) -> Result<(), LifeCycleError> {
+    fn handle_send_commit_result(&self, result: CommitResultBatch<C>) -> Result<(), LifeCycleError> {
         let core_state = self.core_state.read().unwrap();
         if core_state.is_primary() {
             let _ = core_state.send_commit_result(result);

@@ -1,4 +1,4 @@
-use crate::core::fsm::CommitResult;
+use crate::core::fsm::CommitResultBatch;
 use crate::core::notification_msg::NotificationMsg;
 use crate::core::TaskSender;
 use crate::error::{Fatal, LifeCycleError, PacificaError};
@@ -32,7 +32,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn send_commit_result(&self, result: CommitResultBatch<C>) -> Result<(), PacificaError<C>> {
         self.tx_notification.send(NotificationMsg::<C>::SendCommitResult { result })?;
         Ok(())
     }

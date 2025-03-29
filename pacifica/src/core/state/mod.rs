@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use crate::core::fsm::{CommitResult, StateMachineCaller};
+use crate::core::fsm::{CommitResultBatch, StateMachineCaller};
 use crate::core::lifecycle::{ReplicaComponent};
 use crate::core::log::LogManager;
 use crate::core::operation::Operation;
@@ -177,7 +177,7 @@ where
         }
     }
 
-    pub(crate) fn send_commit_result(&self, result: CommitResult<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn send_commit_result(&self, result: CommitResultBatch<C>) -> Result<(), PacificaError<C>> {
         match self {
             CoreState::Primary { state: primary } => {
                 primary.send_commit_result(result)?;

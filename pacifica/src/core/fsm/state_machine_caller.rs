@@ -1,23 +1,20 @@
-use futures::FutureExt;
 use crate::core::fsm::task::Task;
-use crate::core::fsm::CommitResult;
+use crate::core::fsm::{CommitResult, CommitResultBatch};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::task_sender::TaskSender;
-use crate::core::{CoreNotification};
+use crate::core::CoreNotification;
 use crate::error::{Fatal, IllegalSnapshotError, LifeCycleError, PacificaError};
 use crate::fsm::{Entry, StateMachine, UserStateMachineError};
 use crate::model::LogEntryPayload;
 use crate::pacifica::Codec;
 use crate::runtime::{MpscUnboundedReceiver, TypeConfigExt};
 use crate::storage::{SnapshotReader, SnapshotWriter, StorageError};
-use crate::type_config::alias::{
-    MpscUnboundedReceiverOf, OneshotReceiverOf, SnapshotReaderOf,
-    SnapshotWriteOf,
-};
+use crate::type_config::alias::{MpscUnboundedReceiverOf, OneshotReceiverOf, SnapshotReaderOf, SnapshotWriteOf};
 use crate::util::{send_result, AutoClose};
 use crate::{LogId, TypeConfig};
 use anyerror::AnyError;
+use futures::FutureExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tracing::{Level, Span};
@@ -31,7 +28,7 @@ where
     committed_log_index: Arc<AtomicUsize>,
     work_handler: Mutex<Option<WorkHandler<C, FSM>>>,
     tx_task: TaskSender<C, Task<C>>,
-    span: Span
+    span: Span,
 }
 
 impl<C, FSM> StateMachineCaller<C, FSM>
@@ -43,7 +40,7 @@ where
         fsm: FSM,
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         core_notification: Arc<CoreNotification<C>>,
-        span: Span
+        span: Span,
     ) -> Self {
         let committed_log_index = Arc::new(AtomicUsize::new(0));
         let (tx_task, rx_task) = C::mpsc_unbounded();
@@ -66,7 +63,7 @@ where
             committed_log_index,
             work_handler: Mutex::new(Some(work_handler)),
             tx_task: TaskSender::new(tx_task),
-            span
+            span,
         };
         fsm_caller
     }
@@ -128,8 +125,6 @@ where
         self.tx_task.send(Task::ReportError { fatal })?;
         Ok(())
     }
-
-
 }
 
 pub(crate) struct WorkHandler<C, FSM>
@@ -144,7 +139,7 @@ where
     core_notification: Arc<CoreNotification<C>>,
     fatal: Option<Fatal>,
     rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
-    span: Span
+    span: Span,
 }
 
 impl<C, FSM> WorkHandler<C, FSM>
@@ -158,7 +153,7 @@ where
         log_manager: Arc<ReplicaComponent<C, LogManager<C>>>,
         core_notification: Arc<CoreNotification<C>>,
         rx_task: MpscUnboundedReceiverOf<C, Task<C>>,
-        span: Span
+        span: Span,
     ) -> WorkHandler<C, FSM> {
         let committed_log_id = LogId::default();
         WorkHandler {
@@ -169,7 +164,7 @@ where
             core_notification,
             fatal: None,
             rx_task,
-            span
+            span,
         }
     }
 
@@ -223,6 +218,12 @@ where
     ) -> Result<(), LifeCycleError> {
         // case 1: no decode request bytes. eg: From Primary.
         let committed_log_index = self.committed_log_index.load(Ordering::Relaxed);
+        tracing::debug!(
+            "commit batch, committed_log_index: {}, start_log_index: {}, end_log_index: {}",
+            committed_log_index,
+            start_log_index,
+            start_log_index + requests.len() - 1
+        );
         assert_eq!(start_log_index, committed_log_index + 1);
         let max_commit_num = 20;
         let mut entries_buffer = Vec::with_capacity(10);
@@ -233,11 +234,18 @@ where
                 entries_buffer.push(Entry {
                     log_id: LogId::new(primary_term, committing_log_index),
                     request: user_request,
-                })
-            }
-            if entries_buffer.len() >= max_commit_num {
+                });
+                // commit one batch
+                if entries_buffer.len() >= max_commit_num {
+                    self.commit_entries(entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
+                    entries_buffer = Vec::with_capacity(10);
+                }
+            } else {
+                // non user request, need commit
                 self.commit_entries(entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
                 entries_buffer = Vec::with_capacity(10);
+                //
+                self.notification_send_commit_result(CommitResultBatch::inner_result(committing_log_index))?
             }
         }
         self.commit_entries(entries_buffer, LogId::new(primary_term, committing_log_index)).await?;
@@ -252,8 +260,10 @@ where
             // warn log
             return Ok(());
         };
+        tracing::debug!("replay at {}", log_index);
         let max_commit_num = 20;
         let mut entries_buffer = Vec::with_capacity(max_commit_num);
+        let mut commit_point = None;
         let mut committing_log_index = committed_log_index;
         while committing_log_index < log_index {
             committing_log_index += 1;
@@ -261,6 +271,7 @@ where
             match log_entry {
                 Ok(log_entry) => {
                     let log_id = log_entry.log_id.clone();
+                    commit_point = Some(log_id.clone());
                     match log_entry.payload {
                         LogEntryPayload::Normal { op_data } => {
                             let decode_request = C::RequestCodec::decode(op_data);
@@ -271,42 +282,37 @@ where
                                     break;
                                 }
                             }
+                            // commit one batch
+                            if entries_buffer.len() >= max_commit_num {
+                                self.replay_entries(entries_buffer, log_id.clone()).await?;
+                                entries_buffer = Vec::with_capacity(10);
+                            }
                         }
                         LogEntryPayload::Empty => {
-                            //
+                            // for inner request
+                            self.replay_entries(entries_buffer, log_id.clone()).await?;
+                            entries_buffer = Vec::with_capacity(10);
                         }
-                    }
-                    if entries_buffer.len() >= max_commit_num {
-                        self.commit_entries(entries_buffer, log_entry.log_id.clone()).await?;
-                        entries_buffer = Vec::with_capacity(10);
                     }
                 }
                 Err(e) => {
                     //
                     let fatal = match e {
-                        LogManagerError::StorageError(e) =>{
-                            Err(Fatal::StorageError(e))
-                        }
-                        LogManagerError::CorruptedLogEntry(e) => {
-                            Err(Fatal::CorruptedLogEntryError(e))
-                        }
-                        _ => {
-                            Ok(())
-                        }
+                        LogManagerError::StorageError(e) => Err(Fatal::StorageError(e)),
+                        LogManagerError::CorruptedLogEntry(e) => Err(Fatal::CorruptedLogEntryError(e)),
+                        _ => Ok(()),
                     };
                     if let Err(fatal) = fatal {
+                        tracing::error!("replay at {}, but fatal. {}", committing_log_index, fatal);
                         let _ = self.core_notification.report_fatal(fatal);
                     }
                     break;
                 }
             }
         }
-
-        if !entries_buffer.is_empty() {
-            //
-            let _ = self.fsm.on_commit(entries_buffer.into_iter()).await;
+        if let Some(commit_point) = commit_point {
+            self.replay_entries(entries_buffer, commit_point).await?;
         }
-
         Ok(())
     }
 
@@ -345,31 +351,46 @@ where
         Ok(snapshot_log_id)
     }
 
-    fn notification_send_commit_result(
+    fn notification_send_user_result(
         &self,
         start_log_index: usize,
-        commit_result: Vec<Result<C::Response, AnyError>>,
+        user_result: Vec<Result<C::Response, AnyError>>,
     ) -> Result<(), LifeCycleError> {
-        let commit_result = CommitResult {
-            start_log_index,
-            commit_result,
-        };
+        let commit_result_batch = CommitResultBatch::user_result(start_log_index, user_result);
+        self.notification_send_commit_result(commit_result_batch)
+    }
+
+    fn notification_send_commit_result(&self, commit_result: CommitResultBatch<C>) -> Result<(), LifeCycleError> {
         let result = self.core_notification.send_commit_result(commit_result);
         if let Err(e) = result {
             tracing::error!("StateMachineCaller send commit result error: {}", e);
-            return Err(LifeCycleError::Shutdown)
+            return Err(LifeCycleError::Shutdown);
         }
         Ok(())
     }
 
-    /// 提交一批，并设置提交点： committed_log_id
+    #[inline]
+    async fn replay_entries(&mut self, entries: Vec<Entry<C>>, commit_point: LogId) -> Result<(), LifeCycleError> {
+        self.do_commit_entries(entries, commit_point, true).await
+    }
+
+
+    #[inline]
     async fn commit_entries(&mut self, entries: Vec<Entry<C>>, commit_point: LogId) -> Result<(), LifeCycleError> {
+        self.do_commit_entries(entries, commit_point, false).await
+    }
+
+    /// 提交一批，并设置提交点： committed_log_id
+    async fn do_commit_entries(&mut self, entries: Vec<Entry<C>>, commit_point: LogId, for_replay: bool) -> Result<(), LifeCycleError> {
         if !entries.is_empty() {
             let start_log_index = entries.first().unwrap().log_id.index;
             assert_eq!(start_log_index, self.committed_log_index.load(Ordering::Relaxed) + 1);
             let entries = entries.into_iter();
-            let commit_result = self.fsm.on_commit(entries).await;
-            self.notification_send_commit_result(start_log_index, commit_result)?;
+            tracing::debug!("commit user request: len={}", entries.len());
+            let user_result = self.fsm.on_commit(entries).await;
+            if !for_replay {
+                self.notification_send_user_result(start_log_index, user_result)?;
+            }
         }
         self.set_committed_log_id(commit_point);
         Ok(())
@@ -379,6 +400,7 @@ where
         // set committed log info
         self.committed_log_index.store(committed_log_id.index, Ordering::Relaxed);
         self.committed_log_id = committed_log_id;
+        tracing::debug!("set committed log id: {}", committed_log_id);
     }
 
     fn on_shutdown(&mut self) {
@@ -397,27 +419,27 @@ where
             tracing::debug!("starting...");
             loop {
                 futures::select_biased! {
-                 _ = (&mut rx_shutdown).fuse() => {
-                        tracing::info!("StateMachineCaller received shutdown signal.");
-                        break;
-                }
-
-                task_msg = self.rx_task.recv().fuse() => {
-                    match task_msg {
-                        Some(task) => {
-                            let result = self.handle_task(task).await;
-                            if let Err(e) = result {
-                                tracing::error!("StateMachineCaller fatal will shutdown. error: {},", e);
-                            }
-                        }
-                        None => {
-                            tracing::warn!("received unexpected task message.");
+                     _ = (&mut rx_shutdown).fuse() => {
+                            tracing::info!("StateMachineCaller received shutdown signal.");
                             break;
+                    }
+
+                    task_msg = self.rx_task.recv().fuse() => {
+                        match task_msg {
+                            Some(task) => {
+                                let result = self.handle_task(task).await;
+                                if let Err(e) = result {
+                                    tracing::error!("StateMachineCaller fatal will shutdown. error: {},", e);
+                                }
+                            }
+                            None => {
+                                tracing::warn!("received unexpected task message.");
+                                break;
+                            }
                         }
                     }
                 }
             }
-            };
             self.on_shutdown();
             Ok(())
         };

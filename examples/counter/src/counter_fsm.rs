@@ -38,7 +38,7 @@ impl StateMachine<CounterConfig> for CounterFSM {
             CounterRequest::Increment => self.inc(),
             CounterRequest::Decrement => self.dec(),
         };
-
+        tracing::info!("do {:?}. after counter: {}", req, counter);
         Ok(CounterResponse { val: counter })
     }
     async fn on_load_snapshot(

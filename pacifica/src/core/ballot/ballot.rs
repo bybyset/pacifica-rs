@@ -36,10 +36,12 @@ where
         self.quorum.load(Ordering::Relaxed) == 0
     }
 
+
     pub(crate) fn grant(&self, replica_id: &ReplicaId<C::NodeId>) -> bool {
         let result = self.granters.get(replica_id);
         if let Some(granter) = result {
             if granter.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                tracing::debug!("grant. replica_id: {}", replica_id);
                 self.quorum.fetch_sub(1, Ordering::Relaxed);
             }
         }

@@ -1,6 +1,6 @@
 use futures::FutureExt;
 use crate::core::ballot::{Ballot};
-use crate::core::fsm::{CommitResult, StateMachineCaller};
+use crate::core::fsm::{CommitResult, CommitResultBatch, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::operation::Operation;
 use crate::core::replica_group_agent::ReplicaGroupAgent;
@@ -123,7 +123,7 @@ where
         assert!(start_log_index <= end_log_index);
 
         let pending_start_index = self.pending_index.load(Relaxed);
-        let pending_end_index = pending_start_index + self.ballot_queue.read().unwrap().len();
+        let pending_end_index = pending_start_index - 1 + self.ballot_queue.read().unwrap().len();
         if end_log_index < pending_start_index {
             // out of order
             tracing::warn!(
@@ -157,7 +157,7 @@ where
         let end_index = end_log_index - pending_start_index;
         tracing::debug!("start_index: {}, end_index: {}", start_index, end_index);
         let ballots = self.ballot_queue.read().unwrap();
-        let ballots =  ballots.range(start_index..end_index);
+        let ballots =  ballots.range(start_index..(end_index + 1));
         let log_index = grant_ballots(ballots, start_log_index, &replica_id);
         if log_index >= start_log_index {
             let task = Task::CommitBallot { log_index };
@@ -191,7 +191,7 @@ where
     }
 
     /// announce commit result and remove ballot queue
-    pub(crate) fn announce_result(&self, commit_result: CommitResult<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn announce_result(&self, commit_result: CommitResultBatch<C>) -> Result<(), PacificaError<C>> {
         self.tx_task.send(Task::AnnounceBallots { commit_result })?;
         Ok(())
     }
@@ -216,6 +216,8 @@ fn grant_ballots<C: TypeConfig>(
     replica_id: &ReplicaId<C::NodeId>,
 ) -> usize {
     let mut commit_end_log_index = start_log_index - 1;
+    let end_log_index = commit_end_log_index + ballots.len();
+    tracing::debug!("grant_ballots for replica_id: {}. start_log_index: {}, end_log_index(include): {}", replica_id, start_log_index, end_log_index);
     let mut last_granted = true;
     for ballot in ballots {
         if ballot.ballot.grant(replica_id) {
@@ -326,23 +328,31 @@ where
         Ok(())
     }
 
+
     fn handle_commit_ballot(&mut self, end_log_index_include: usize) -> Result<(), PacificaError<C>> {
         let last_committed_index = self.last_committed_index.load(Relaxed);
         let pending_log_index = self.pending_index.load(Relaxed);
         if end_log_index_include > last_committed_index {
-            let start_log_index = last_committed_index + 1;
+            tracing::debug!("committing ballot.");
+            let mut start_log_index = last_committed_index + 1;
+
+            // commit log storage (option)
+            if start_log_index < pending_log_index {
+                assert!(pending_log_index > 0);
+                self.fsm_caller.replay_at(pending_log_index - 1)?;
+                start_log_index = pending_log_index;
+            }
+            // commit ballot queue [pending_log_index, end_log_index_include]
             assert!(start_log_index >= pending_log_index);
             assert!(end_log_index_include < pending_log_index + self.ballot_queue.read().unwrap().len());
             let start_index = start_log_index - pending_log_index;
             let end_index = end_log_index_include - pending_log_index;
-
-
             let mut ballot_queue = self.ballot_queue.write().unwrap();
             let ballot_context = ballot_queue.get_mut(start_index);
             if let Some(ballot_context) = ballot_context {
                 let first_primary_term = ballot_context.primary_term;
                 let request = ballot_context.request.take();
-                let mut requests = vec![];
+                let mut requests = Vec::new();
                 requests.push(request);
                 if start_index + 1 <= end_index {
                     for ballot_context in ballot_queue.range_mut(start_index + 1..=end_index)
@@ -352,9 +362,9 @@ where
                         requests.push(request);
                     }
                 }
-                let new_last_committed_index = start_log_index + requests.len();
+                let new_last_committed_index = start_log_index + requests.len() - 1;
+                tracing::debug!("committing requests. start_log_index: {}, new_last_committed_index: {}", start_log_index, new_last_committed_index);
                 self.fsm_caller.commit_requests(start_log_index, first_primary_term, requests)?;
-
                 // set new_last_committed_index
                 self.last_committed_index.store(new_last_committed_index, Relaxed);
             }
@@ -391,7 +401,7 @@ where
         }
         Ok(())
     }
-    fn handle_commit_result(&mut self, commit_result: CommitResult<C>) -> Result<(), LifeCycleError> {
+    fn handle_commit_result(&mut self, commit_result: CommitResultBatch<C>) -> Result<(), LifeCycleError> {
         //
         let start_log_index = commit_result.start_log_index;
         let pending_index = self.pending_index.load(Relaxed);
@@ -400,12 +410,21 @@ where
         assert!(commit_result.commit_result.len() <= ballot_queue.len());
         for result in commit_result.commit_result.into_iter() {
             if let Some(ballot_context) = ballot_queue.pop_front() {
-                self.pending_index.fetch_add(1, Relaxed);
+                let log_index = self.pending_index.fetch_add(1, Relaxed);
                 // 发送用户定义的异常
                 if let Some(result_sender) = ballot_context.result_sender {
-                    let result =
-                        result.map_err(|e| PacificaError::<C>::UserFsmError(UserStateMachineError::while_commit_entry(e)));
-                    let _ = send_result::<C, <C as TypeConfig>::Response, PacificaError<C>>(result_sender, result);
+                    if let CommitResult::UserResult { result } = result {
+                        // user request
+                        let result =
+                            result.map_err(|e| PacificaError::<C>::UserFsmError(UserStateMachineError::while_commit_entry(e)));
+                        let _ = send_result::<C, <C as TypeConfig>::Response, PacificaError<C>>(result_sender, result);
+                        tracing::debug!("send user result at {}", log_index);
+                    } else {
+                        // inner request
+                        tracing::debug!("send inner result at {}", log_index);
+                    }
+                } else {
+                    tracing::debug!("not result to send at {}", log_index);
                 }
             } else {
                 // warn log
@@ -537,7 +556,7 @@ where
     },
 
     AnnounceBallots {
-        commit_result: CommitResult<C>,
+        commit_result: CommitResultBatch<C>,
     },
 
     CaughtUp {

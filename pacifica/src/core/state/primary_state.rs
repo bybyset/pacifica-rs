@@ -1,6 +1,6 @@
 use futures::FutureExt;
 use crate::core::ballot::BallotBox;
-use crate::core::fsm::{CommitResult, StateMachineCaller};
+use crate::core::fsm::{CommitResultBatch, StateMachineCaller};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::operation::Operation;
@@ -113,7 +113,7 @@ where
         Ok(())
     }
 
-    pub(crate) fn send_commit_result(&self, commit_result: CommitResult<C>) -> Result<(), PacificaError<C>> {
+    pub(crate) fn send_commit_result(&self, commit_result: CommitResultBatch<C>) -> Result<(), PacificaError<C>> {
         self.ballot_box.announce_result(commit_result)
     }
 

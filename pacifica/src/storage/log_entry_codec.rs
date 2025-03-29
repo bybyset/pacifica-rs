@@ -54,7 +54,7 @@ impl LogEntryCodec for DefaultLogEntryCodec {
         let mut header = [0; HEADER_LEN];
         reader.read(&mut header).unwrap();
         //check
-
+        assert_eq!(header, CODEC_HEADER);
         let log_index = reader.read_u64::<BigEndian>().unwrap();
         let log_term = reader.read_u64::<BigEndian>().unwrap();
         let has_check_sum = reader.read_u8().unwrap();
@@ -66,12 +66,127 @@ impl LogEntryCodec for DefaultLogEntryCodec {
         let mut payload = LogEntryPayload::Empty;
         let payload_len = reader.read_u32::<BigEndian>().unwrap();
         if payload_len > 0 {
-            let mut payload_v = Vec::with_capacity(payload_len as usize);
-            reader.read_exact(payload_v.as_mut_slice()).unwrap();
+            let mut payload_v = vec![0; payload_len as usize];
+            reader.read(&mut payload_v).unwrap();
             payload = LogEntryPayload::with_vec(payload_v);
         }
 
         let log_entry = LogEntry::with_check_sum(LogId::new(log_term as usize, log_index as usize), payload, check_sum);
         Ok(log_entry)
     }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use bytes::Bytes;
+    use crate::{LogEntry, LogId};
+    use crate::model::LogEntryPayload;
+    use crate::storage::{DefaultLogEntryCodec, LogEntryCodec};
+    use crate::storage::log_entry_codec::{CODEC_MAGIC, CODEC_RESERVED, CODEC_VERSION};
+    use crate::util::Checksum;
+
+    fn deep_clone_log_entry(original: &LogEntry) -> LogEntry {
+        let log_id = original.log_id.clone();
+        let check_sum = original.check_sum.clone();
+        let op_data = match &original.payload {
+            LogEntryPayload::Empty => {
+                LogEntryPayload::Empty
+            }
+            LogEntryPayload::Normal { op_data } => {
+                let data = op_data.to_vec();
+                LogEntryPayload::Normal { op_data: Bytes::from(data) }
+            }
+        };
+
+        let normal_entry = LogEntry::with_check_sum(
+            log_id,
+            op_data,
+            check_sum
+        );
+        normal_entry
+    }
+
+    // 辅助函数：测试编解码往返过程
+    fn test_codec_roundtrip(original: LogEntry) {
+        let cloned = deep_clone_log_entry(&original);
+        let encoded = DefaultLogEntryCodec::encode(cloned).unwrap();
+        let decoded = DefaultLogEntryCodec::decode(encoded).unwrap();
+
+        // 验证基本属性
+        assert_eq!(decoded.log_id.term, original.log_id.term);
+        assert_eq!(decoded.log_id.index, original.log_id.index);
+        assert_eq!(decoded.check_sum, original.check_sum);
+
+        // 验证负载
+        match (decoded.payload, original.payload) {
+            (LogEntryPayload::Empty, LogEntryPayload::Empty) => (),
+            (LogEntryPayload::Normal { op_data: d1 }, LogEntryPayload::Normal { op_data: d2 }) => {
+                assert_eq!(d1, d2);
+            }
+            _ => panic!("Payload types don't match"),
+        }
+    }
+
+    #[test]
+    pub fn test_empty_entry_codec() {
+        // 测试空日志条目的编解码
+        let empty_entry = LogEntry::with_empty(LogId::new(1, 1));
+        test_codec_roundtrip(empty_entry);
+    }
+
+    #[test]
+    pub fn test_payload_entry_without_checksum_codec() {
+        // 测试带数据但没有 checksum 的日志条目
+        let data = Bytes::from(vec![1, 2, 3, 4]);
+        let normal_entry = LogEntry::with_op_data(LogId::new(2, 3), data);
+        test_codec_roundtrip(normal_entry);
+    }
+
+    #[test]
+    pub fn test_payload_entry_codec() {
+        // 测试带 checksum 的日志条目
+        let mut entry_with_checksum = LogEntry::with_op_data(
+            LogId::new(4, 5),
+            Bytes::from(vec![5, 6, 7, 8]),
+        );
+        let checksum = entry_with_checksum.checksum();
+        entry_with_checksum.set_check_sum(checksum);
+        test_codec_roundtrip(entry_with_checksum);
+    }
+
+    #[test]
+    pub fn test_codec_edge_cases() {
+        // 测试最大索引值和任期值
+        let max_values_entry = LogEntry::with_empty(
+            LogId::new(usize::MAX, usize::MAX),
+        );
+        test_codec_roundtrip(max_values_entry);
+
+        // 测试零索引值和任期值
+        let zero_values_entry = LogEntry::with_empty(
+            LogId::new(0, 0),
+        );
+        test_codec_roundtrip(zero_values_entry);
+
+        // 测试特殊字符数据
+        let special_chars = vec![0xFF, 0x00, 0xFE, 0x01];
+        let special_entry = LogEntry::with_op_data(
+            LogId::new(8, 9),
+            Bytes::from(special_chars),
+        );
+        test_codec_roundtrip(special_entry);
+    }
+
+    #[test]
+    pub fn test_codec_header() {
+        let entry = LogEntry::with_empty(LogId::new(1, 1));
+        let encoded = DefaultLogEntryCodec::encode(entry).unwrap();
+
+        // 验证编码后的头部
+        assert_eq!(encoded[0], CODEC_MAGIC);
+        assert_eq!(encoded[1], CODEC_VERSION);
+        assert_eq!(encoded[2], CODEC_RESERVED);
+        assert_eq!(encoded[3], CODEC_RESERVED);
+    }
+
 }

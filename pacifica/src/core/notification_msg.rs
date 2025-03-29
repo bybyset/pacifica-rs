@@ -1,4 +1,4 @@
-use crate::core::fsm::CommitResult;
+use crate::core::fsm::CommitResultBatch;
 use crate::core::ResultSender;
 use crate::error::{Fatal, LifeCycleError};
 use crate::TypeConfig;
@@ -8,7 +8,7 @@ where
     C: TypeConfig,
 {
     /// send commit result for user
-    SendCommitResult { result: CommitResult<C> },
+    SendCommitResult { result: CommitResultBatch<C> },
 
     /// replica state of meta changed
     CoreStateChange,
