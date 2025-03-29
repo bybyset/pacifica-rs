@@ -231,7 +231,6 @@ where
             // fsm on snapshot load
             let snapshot_log_id = self.fsm_caller.on_snapshot_load(AutoClose::new(snapshot_reader)).await?;
             tracing::info!("success to load snapshot. log_id: {}", snapshot_log_id);
-            //
             self.on_snapshot_success(snapshot_log_id.clone()).await?;
             return Ok(snapshot_log_id);
         };

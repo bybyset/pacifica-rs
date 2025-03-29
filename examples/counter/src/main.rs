@@ -56,8 +56,17 @@ async fn main() {
         Ok(replica) => {
             println!("start pacifica");
             let result = replica.commit(CounterRequest::Increment).await.unwrap();
+            println!("{:?}", result);
 
-            println!("{:?}", result)
+            let result = replica.snapshot().await;
+            match result {
+                Ok(log_id) => {
+                    println!("snapshot log_id: {:?}", log_id);
+                }
+                Err(e) => {
+                    println!("snapshot error: {:?}", e);
+                }
+            }
         }
         Err(e) => {
             println!("Error: {:?}", e);

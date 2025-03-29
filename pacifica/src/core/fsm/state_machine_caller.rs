@@ -342,6 +342,7 @@ where
         mut snapshot_writer: AutoClose<SnapshotWriteOf<C>>,
     ) -> Result<LogId, PacificaError<C>> {
         let snapshot_log_id = self.committed_log_id.clone();
+        tracing::debug!("save snapshot at log_id: {}", snapshot_log_id);
         snapshot_writer
             .write_snapshot_log_id(snapshot_log_id.clone())
             .map_err(|e| StorageError::write_log_id(snapshot_log_id, e))?;

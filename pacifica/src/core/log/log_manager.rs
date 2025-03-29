@@ -406,6 +406,7 @@ where C: TypeConfig {
     /// append日志至存储
     /// 异常后返回StorageError
     async fn append_to_storage(&self, log_entries: Vec<LogEntry>) -> Result<(), StorageError> {
+        let entries_len = log_entries.len();
         let mut writer = self.log_storage.open_writer().await.map_err(|e| StorageError::open_writer(e))?;
         let write_result = self.write_log_entries(&mut writer, log_entries).await;
         let flush_result = writer.flush().await;
@@ -417,6 +418,8 @@ where C: TypeConfig {
             // Write partial log error
             return Err(StorageError::append_entries(index, e));
         }
+        self.last_log_index.fetch_add(entries_len, Ordering::Relaxed);
+        tracing::debug!("append log entries to storage. last_log_index: {}", self.last_log_index.load(Ordering::Relaxed));
         Ok(())
     }
 
@@ -487,8 +490,8 @@ where C: TypeConfig {
         if snapshot_log_id < self.last_snapshot_log_id.read().unwrap().clone() {
             return Ok(());
         }
+        tracing::debug!("on snapshot(load/save). will prepare for LogManager. snapshot_log_id : {:?}", snapshot_log_id);
         loop {
-
             // case 1: normal, only truncate prefix
             let local_term = self.log_manager_inner.get_log_term_at(snapshot_log_id.index).await?;
             if local_term == snapshot_log_id.term {
@@ -498,6 +501,7 @@ where C: TypeConfig {
                 let first_log_index_kept = max(0, first_log_index_kept);
                 if first_log_index_kept > self.first_log_index.load(Ordering::Relaxed) {
                     self.handle_truncate_prefix(first_log_index_kept).await?;
+                    tracing::info!("(normal) truncate prefix log to first_log_index_kept: {} ", first_log_index_kept);
                 }
                 break;
             }
@@ -505,7 +509,9 @@ where C: TypeConfig {
             let last_log_index = self.last_log_index.load(Ordering::Relaxed);
             if local_term == 0 && snapshot_log_id.index > last_log_index {
                 //
-                self.handle_truncate_prefix(snapshot_log_id.index + 1).await?;
+                let first_log_index_kept = snapshot_log_id.index + 1;
+                self.handle_truncate_prefix(first_log_index_kept).await?;
+                tracing::info!("(end boundary) truncate prefix log to first_log_index_kept: {} ", first_log_index_kept);
                 break;
             }
             // case 3: in range log entry queue, but conflicting at snapshot log index.
@@ -514,6 +520,7 @@ where C: TypeConfig {
         }
         let mut last_snapshot_log_id =  self.last_snapshot_log_id.write().unwrap();
         *last_snapshot_log_id = snapshot_log_id;
+        tracing::debug!("on snapshot(load/save). done. last_snapshot_log_id : {:?}", snapshot_log_id);
         Ok(())
     }
 
