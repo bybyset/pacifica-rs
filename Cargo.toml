@@ -2,9 +2,9 @@
 version = "1.0.0"
 edition = "2021"
 authors = ["cff"]
-categories = ["algorithms", "asynchronous", "replication"]
+categories = ["algorithms", "asynchronous", "data-structures"]
 description = "rust implementation of PacificA: Replication in Log-Based Distributed Storage Systems"
-documentation = ""
+documentation = "https://docs.rs/pacifica-rs"
 homepage = "https://github.com/bybyset/pacifica-rs"
 keywords = ["pacifica", "consensus"]
 license = "MIT"
