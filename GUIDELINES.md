@@ -19,7 +19,7 @@
 
 
 ## 模型架构
-![model](https://github.com/bybyset/pacifica-rs/blob/main/docs/PacificA%E6%9E%B6%E6%9E%84%E6%A8%A1%E5%9E%8B.png)  
+![model](https://github.com/bybyset/jpacifica/blob/main/docs/PacificA%E6%9E%B6%E6%9E%84%E6%A8%A1%E5%9E%8B.png)  
 如上图所示，在PacificA中，将“数据存储复制”与“副本配置管理”分离，
 其中“数据存储集群”数据以“副本”的形式分布在不同的节点，多个“副本”组成“副本组”，
 也可以称作“切片”，多个副本间通过复制主副本的操作日志实现数据一致。
@@ -31,7 +31,7 @@
 
 
 ## 副本状态转换图
-![state](https://github.com/bybyset/pacifica-rs/blob/main/docs/PacificA%E7%8A%B6%E6%80%81%E8%BD%AC%E6%8D%A2%E5%9B%BE.png)  
+![state](https://github.com/bybyset/jpacifica/blob/main/docs/PacificA%E7%8A%B6%E6%80%81%E8%BD%AC%E6%8D%A2%E5%9B%BE.png)  
 在pacifica-rs中采用租期(Leases)的方式实现主/从副本间的故障检测。
 1. 主副本定期向从副本发送心跳请求，并收到“成功”的响应后即为获得来自指定从副本的租约(lease),
    若主副本长时间未收到心跳响应(超过租赁期lease period)，则认为从副本故障，并联系配置管理集群要求将故障的从副本从副本组中移除。
