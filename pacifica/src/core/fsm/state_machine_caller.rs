@@ -1,5 +1,5 @@
 use crate::core::fsm::task::Task;
-use crate::core::fsm::{CommitResult, CommitResultBatch};
+use crate::core::fsm::{CommitResultBatch};
 use crate::core::lifecycle::{Component, Lifecycle, LoopHandler, ReplicaComponent};
 use crate::core::log::{LogManager, LogManagerError};
 use crate::core::task_sender::TaskSender;

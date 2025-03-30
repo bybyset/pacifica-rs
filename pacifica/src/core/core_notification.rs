@@ -48,7 +48,7 @@ where
             callback: tx
         })?;
         let result: Result<(), LifeCycleError> = rx.await?;
-        result.map_err(|e| {
+        result.map_err(|_| {
             PacificaError::Shutdown
         })?;
         Ok(())

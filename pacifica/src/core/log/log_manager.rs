@@ -15,7 +15,7 @@ use anyerror::AnyError;
 use std::cmp::max;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::{span, Level, Span};
+use tracing::{Level, Span};
 use tracing_futures::Instrument;
 use crate::storage::{LogReader, LogStorage, LogWriter, StorageError};
 

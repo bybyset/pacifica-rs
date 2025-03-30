@@ -1110,7 +1110,6 @@ dependencies = [
  "crc",
  "futures",
  "log",
- "pacifica-rs-macros",
  "rocksdb",
  "thiserror 2.0.3",
  "tokio",
@@ -1127,20 +1126,12 @@ dependencies = [
  "anyerror",
  "bytes",
  "chrono",
+ "clap",
  "pacifica-rs",
  "pacifica-rs-rpc-impl-grpc",
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "pacifica-rs-macros"
-version = "1.0.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.89",
 ]
 
 [[package]]

@@ -8,12 +8,16 @@ pub struct CounterMetaClient {
 }
 
 impl CounterMetaClient {
-    pub fn new() -> CounterMetaClient {
+    pub fn new(primary: StrNodeId) -> CounterMetaClient {
         let group_name = String::from(COUNTER_GROUP_NAME);
-        let primary = StrNodeId::with_str("node_01");
         CounterMetaClient {
             replica_group: ReplicaGroup::new(group_name, 1, 1, primary, vec![]),
         }
+    }
+
+    pub fn add_replica(&mut self, node_id: StrNodeId) {
+        self.replica_group.add_secondary(node_id)
+
     }
 }
 

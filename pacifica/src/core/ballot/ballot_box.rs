@@ -18,7 +18,6 @@ use std::collections::VecDeque;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicUsize};
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::instrument;
 
 pub(crate) struct BallotBox<C, FSM>
 where

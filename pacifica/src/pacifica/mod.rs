@@ -1,13 +1,10 @@
 use std::fmt::Debug;
 
 mod codec;
-mod declare_pacifica_types;
 mod replica;
 mod router;
 
 pub use self::replica::Replica;
-
-pub use self::declare_pacifica_types::*;
 
 pub trait Request: Debug + Send + Sync + Sized {}
 

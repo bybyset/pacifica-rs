@@ -23,7 +23,7 @@ use crate::{LogId, ReplicaId, ReplicaOption, ReplicaState, TypeConfig};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use anyerror::AnyError;
-use tracing::{Instrument, Level, Span};
+use tracing::{Level, Span};
 use crate::fsm::StateMachine;
 
 pub(crate) struct ReplicaCore<C, FSM>
