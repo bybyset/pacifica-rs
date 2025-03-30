@@ -1029,6 +1029,7 @@ dependencies = [
  "log",
  "pacifica-rs-macros",
  "rocksdb",
+ "tempfile",
  "thiserror 2.0.3",
  "tokio",
  "tracing",

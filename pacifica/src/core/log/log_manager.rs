@@ -495,9 +495,12 @@ where C: TypeConfig {
             // case 1: normal, only truncate prefix
             let local_term = self.log_manager_inner.get_log_term_at(snapshot_log_id.index).await?;
             if local_term == snapshot_log_id.term {
+
                 // truncate prefix and reserved
-                let first_log_index_kept =
-                    snapshot_log_id.index + 1 - self.replica_option.snapshot_reserved_entry_num as usize;
+                let first_log_index_kept = {
+                    (snapshot_log_id.index + 1).saturating_sub(self.replica_option.snapshot_reserved_entry_num as usize)
+                };
+
                 let first_log_index_kept = max(0, first_log_index_kept);
                 if first_log_index_kept > self.first_log_index.load(Ordering::Relaxed) {
                     self.handle_truncate_prefix(first_log_index_kept).await?;

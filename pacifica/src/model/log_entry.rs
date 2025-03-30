@@ -1,7 +1,7 @@
 use crate::util::{ByteSize, Checksum};
 use crate::LogId;
-use std::fmt::{Debug, Display, Formatter};
 use bytes::Bytes;
+use std::fmt::{Debug, Display, Formatter};
 
 const CRC_64_ECMA_182: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_ECMA_182);
 
@@ -22,7 +22,6 @@ pub enum LogEntryPayload {
 }
 
 impl LogEntryPayload {
-
     pub fn new(op_data: Bytes) -> Self {
         if op_data.is_empty() {
             Self::empty()
@@ -52,6 +51,30 @@ impl Display for LogEntryPayload {
             }
             LogEntryPayload::Normal { op_data } => {
                 write!(f, "Normal [len={}]", op_data.len())
+            }
+        }
+    }
+}
+
+impl PartialEq for LogEntryPayload {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (LogEntryPayload::Empty, LogEntryPayload::Empty) => true,
+            (LogEntryPayload::Normal { op_data: a }, LogEntryPayload::Normal { op_data: b }) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Clone for LogEntryPayload {
+    fn clone(&self) -> Self {
+        match &self {
+            LogEntryPayload::Empty => LogEntryPayload::Empty,
+            LogEntryPayload::Normal { op_data } => {
+                let op_data = Bytes::from(op_data.to_vec());
+                LogEntryPayload::Normal {
+                    op_data: op_data.clone(),
+                }
             }
         }
     }
@@ -141,6 +164,22 @@ impl Checksum for LogEntry {
     }
 }
 
+impl Clone for LogEntry {
+    fn clone(&self) -> Self {
+        let log_id = self.log_id.clone();
+        let checksum = self.check_sum.clone();
+        let payload = self.payload.clone();
+        LogEntry::with_check_sum(log_id, payload, checksum)
+    }
+}
+
+impl PartialEq for LogEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.log_id == other.log_id && self.payload == other.payload
+    }
+
+}
+
 fn write_format(log_entry: &LogEntry, f: &mut Formatter<'_>) -> std::fmt::Result {
     write!(
         f,
@@ -149,12 +188,11 @@ fn write_format(log_entry: &LogEntry, f: &mut Formatter<'_>) -> std::fmt::Result
     )
 }
 
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use bytes::Bytes;
-    use crate::{LogEntry, LogId};
     use crate::util::Checksum;
+    use crate::{LogEntry, LogId};
+    use bytes::Bytes;
 
     #[test]
     pub(crate) fn test_checksum() {
@@ -183,8 +221,6 @@ pub(crate) mod tests {
         assert_ne!(entry1.checksum(), entry2.checksum());
     }
 
-
-
     #[test]
     pub(crate) fn test_checksum_components() {
         // 测试日志 ID 的不同组件对 checksum 的影响
@@ -209,5 +245,4 @@ pub(crate) mod tests {
         entry.set_check_sum(123);
         assert!(entry.has_check_sum());
     }
-
 }

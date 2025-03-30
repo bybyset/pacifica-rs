@@ -44,7 +44,7 @@ proc-macro2 = "1.0"
 syn = "2.0"
 
 rocksdb = {version = "0.23.0"}
-
+tempfile = { version = "3.17.1" }
 
 [workspace]
 members = ["pacifica", "macros", "tests", "extension/rpc-impl-grpc", ]
