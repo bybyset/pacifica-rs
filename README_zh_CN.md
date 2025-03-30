@@ -22,7 +22,7 @@ pacifica-rs会自动帮你完成“状态机”之间的一致。
 请参考[counter示例](./examples/counter)
 
 ### 指南
-请参参阅[指南文档](./GUIDELINES.md)
+请参阅[指南](./GUIDELINES.md)
 
 
 ## 贡献
