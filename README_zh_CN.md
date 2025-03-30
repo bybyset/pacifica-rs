@@ -19,13 +19,10 @@ pacifica-rs会自动帮你完成“状态机”之间的一致。
 
 ## 文档
 ### 如何使用
-请参阅文档[《如何使用》](./docs/how-to-use.md)
+请参考[counter示例](./examples/counter)
 
 ### 指南
 请参参阅[指南文档](./GUIDELINES.md)
-
-### 关于PacificA
-请参阅原文[《PacificA: Replication in Log-Based Distributed Storage Systems》](https://github.com/bybyset/jpacifica/blob/main/docs/PacificA.pdf)
 
 
 ## 贡献

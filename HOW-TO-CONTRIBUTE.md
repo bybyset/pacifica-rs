@@ -5,7 +5,7 @@
 
 ## 获取源码
 ### fork
-打开浏览器登录GitHub并找到[pacifica-rs仓库](https://github.com/JavaCoderCff/pacifica-rs)，点击左上角的 fork 按钮，复制一份 pacifica-rs 主干代码到您的代码仓库。
+打开浏览器登录GitHub并找到[pacifica-rs仓库](https://github.com/bybyset/pacifica-rs)，点击左上角的 fork 按钮，复制一份 pacifica-rs 主干代码到您的代码仓库。
 
 ### clone
 执行以下命令将代码克隆到本地  

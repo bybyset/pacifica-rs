@@ -26,13 +26,10 @@ You only need to implement your own "state machine," and pacifica-rs will automa
 ## Doc
 
 ### How to use
-To see [how-to-use](./how-to-use.md)
+To see example [counter](./examples/counter)
 
 ### GUIDE
 To see [GUIDELINES](./GUIDELINES.md)
-
-### About PacificA
-To see [《PacificA: Replication in Log-Based Distributed Storage Systems》](./docs/PacificA.pdf)
 
 
 ## Contribution
