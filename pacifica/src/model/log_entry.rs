@@ -5,6 +5,7 @@ use std::fmt::{Debug, Display, Formatter};
 
 const CRC_64_ECMA_182: crc::Crc<u64> = crc::Crc::<u64>::new(&crc::CRC_64_ECMA_182);
 
+/// op log entry
 pub struct LogEntry {
     pub log_id: LogId,
     pub payload: LogEntryPayload,

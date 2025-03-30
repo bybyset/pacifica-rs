@@ -82,6 +82,7 @@ where
         Ok(replica)
     }
 
+    /// get replica state
     pub fn get_replica_state(&self) -> ReplicaState {
         self.inner.replica_core.get_replica_state()
     }
@@ -113,7 +114,8 @@ where
         result
     }
 
-    ///
+    ///A replica of the Candidate state joins the replica group by calling the func
+    /// to revert to the Secondary state
     pub async fn recover(&self) -> Result<(), PacificaError<C>> {
         let (result_sender, rx) = C::oneshot();
         self.inner
@@ -146,6 +148,7 @@ where
         result
     }
 
+    /// shutdown
     pub async fn shutdown(&mut self) -> Result<(), LifeCycleError> {
         self.inner.replica_core.shutdown().await?;
         Ok(())

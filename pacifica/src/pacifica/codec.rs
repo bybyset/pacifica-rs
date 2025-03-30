@@ -4,8 +4,11 @@ use anyerror::AnyError;
 use bytes::Bytes;
 
 pub trait Codec<T> {
+
+    ///Usually used to encode your Request
     fn encode(entry: &T) -> Result<Bytes, EncodeError<T>>;
 
+    ///Usually used to decode your Request
     fn decode(bytes: Bytes) -> Result<T, DecodeError>;
 }
 

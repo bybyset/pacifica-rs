@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use crate::type_config::NodeIdEssential;
 
-
+/// default impl for NodeId by wrap String
 pub struct StrNodeId{
     node_id: Arc<String>
 }

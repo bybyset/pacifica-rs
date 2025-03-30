@@ -12,11 +12,13 @@ where C: TypeConfig {
     ///
     fn get_replica_group(&self, group_name: &str) -> impl Future<Output = Result<ReplicaGroup<C>, MetaError>> + Send;
 
-    ///
+    /// add secondary
     fn add_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
+    /// remove secondary
     fn remove_secondary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
+    /// change primary
     fn change_primary(&self, replica_id: ReplicaId<C::NodeId>, version: usize) -> impl Future<Output = Result<(), MetaError>> + Send;
 
 
