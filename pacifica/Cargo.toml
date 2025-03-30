@@ -35,9 +35,7 @@ tempfile = {workspace = true}
 
 
 [features]
-
 default = ["tokio-runtime", "snapshot-storage-fs", "log-storage-rocksdb"]
-
 # Enable the default Tokio runtime
 tokio-runtime = ["dep:tokio"]
 log-storage-rocksdb = ["dep:rocksdb"]
